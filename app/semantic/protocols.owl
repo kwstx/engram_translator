@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://agent.middleware.org/protocols.owl#"
+     xml:base="http://agent.middleware.org/protocols.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:A2A="http://agent.middleware.org/A2A#"
+     xmlns:MCP="http://agent.middleware.org/MCP#">
+    <owl:Ontology rdf:about="http://agent.middleware.org/protocols.owl"/>
+
+    <!-- Namespaces -->
+    <owl:ObjectProperty rdf:about="http://agent.middleware.org/protocols.owl#equivalentTo"/>
+
+    <!-- Classes for A2A -->
+    <owl:Class rdf:about="http://agent.middleware.org/A2A#task_handoff">
+        <owl:equivalentClass rdf:resource="http://agent.middleware.org/MCP#coord_transfer"/>
+    </owl:Class>
+
+    <!-- Classes for MCP -->
+    <owl:Class rdf:about="http://agent.middleware.org/MCP#coord_transfer"/>
+
+</rdf:RDF>
