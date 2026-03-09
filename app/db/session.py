@@ -17,5 +17,5 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db():
     async with engine.begin() as conn:
         # Import models here to make sure they are registered with SQLModel.metadata
-        # from app.db.models import ProtocolMapping, SemanticOntology
+        from app.db.models import ProtocolMapping, AgentRegistry, SemanticOntology
         await conn.run_sync(SQLModel.metadata.create_all)
