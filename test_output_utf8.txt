@@ -1,0 +1,45 @@
+﻿.\venv\Scripts\python : INFO:
+app.semantic.mapper:Successfu
+lly loaded ontology from C:\U
+sers\galan\translator_middlew
+are\app\semantic\protocols.ow
+l
+At line:1 char:1
++ .\venv\Scripts\python app/s
+emantic/test_data_silo_resolv
+er.py > test_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (INFO:ap  
+  p.semant...c\protocols.o   
+ wl:String) [], RemoteExc    
+eption
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+INFO:app.semantic.mapper:Reso
+lving data silo from A2A to 
+MCP
+INFO:app.semantic.mapper:Sour
+ce data validated 
+successfully.
+INFO:app.semantic.mapper:PyDa
+talog mapping: 
+user_info.name -> 
+profile.fullname
+INFO:app.semantic.mapper:PyDa
+talog mapping: 
+payload.timestamp -> 
+data_bundle.iso_date
+Testing DataSiloResolver...
+
+Resolved Data:
+{
+  "profile.fullname": "John Doe",
+  "user_info.email": "john@example.com",
+  "data_bundle.iso_date": "2024-03-20T10:00:00Z"
+}
+
+Test PASSED!

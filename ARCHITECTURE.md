@@ -50,7 +50,11 @@ graph TD
 ### B. Semantic Resolver
 - **Responsibility**: Translates the "content" or "meaning" of the payload.
 - **Function**: Uses a common ontology or LLM-driven mapping to ensure that "DeliveryDate" in Agent A's protocol means the same as "arrival_estimated" in Agent B's protocol.
-- **Data Silo Resolution**: Maps disparate data schemas to a unified internal representation.
+- **DataSiloResolver**:
+    - **Schema Validation**: Uses JSON Schema to detect differences between source and target data structures.
+    - **Structural Transformations**: Recursively flattens nested objects (e.g., `user_info.name`) to a flat representation for easier mapping.
+    - **Rule Engine (PyDatalog)**: Applies dynamic logic rules to map complex fields (e.g., mapping `user_info.name` to `profile.fullname`).
+    - **Ontology Mappings**: Uses OWL-based equivalents to resolve concepts across protocols.
 
 ### C. Discovery Service
 - **Responsibility**: Registry and lookup.

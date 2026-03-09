@@ -10,3 +10,5 @@ asyncpg>=0.29.0
 pydantic-settings>=2.2.1
 python-dotenv>=1.0.1
 owlready2>=0.45
+jsonschema>=4.21.0
+pyDatalog>=0.17.4
