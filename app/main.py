@@ -10,7 +10,7 @@ from app.core.logging import configure_logging
 from app.db.session import init_db
 from app.services.task_worker import TaskWorker
 from contextlib import asynccontextmanager
-from fastapi_prometheus_middleware import PrometheusMiddleware, metrics
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.services.discovery import DiscoveryService
 
@@ -48,12 +48,7 @@ app.add_middleware(SlowAPIMiddleware)
 if settings.HTTPS_ONLY:
     app.add_middleware(HTTPSRedirectMiddleware)
 
-app.add_middleware(
-    PrometheusMiddleware,
-    app_name=settings.PROJECT_NAME,
-    group_paths=True,
-)
-app.add_route("/metrics", metrics)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 @app.get("/", tags=["Health"])
 async def root():
