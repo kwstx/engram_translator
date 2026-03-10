@@ -19,7 +19,7 @@ jobs:
 
   deploy:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && secrets.GCP_SA_KEY != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
