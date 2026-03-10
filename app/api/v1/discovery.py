@@ -4,6 +4,7 @@ from app.db.session import get_session
 from app.db.models import AgentRegistry, ProtocolMapping
 from pydantic import BaseModel, Field
 from typing import List
+from app.services.discovery import DiscoveryService
 
 router = APIRouter(prefix="/discovery", tags=["Discovery"])
 
@@ -49,3 +50,22 @@ async def discover_agents(
     agents = results.scalars().all()
     
     return agents
+
+@router.get("/collaborators", response_model=List[AgentRegistry])
+async def get_collaborators(
+    protocols: str,
+    min_score: float = 0.7,
+    db: Session = Depends(get_session)
+):
+    """
+    Finds collaborative agents based on compatibility score formula:
+    (shared_protocols + mappable_protocols) / total_protocols >= min_score
+    Protocols should be a comma-separated list of strings.
+    """
+    protocol_list = [p.strip() for p in protocols.split(",") if p.strip()]
+    collaborators = await DiscoveryService.find_collaborators(
+        session=db,
+        source_protocols=protocol_list,
+        min_score=min_score
+    )
+    return collaborators

@@ -7,13 +7,21 @@ from app.messaging.events import rabbitmq
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
 
+from app.services.discovery import DiscoveryService
+
+discovery_service = DiscoveryService()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB (create tables if they don't exist)
     await init_db()
     # Initialize RabbitMQ
     await rabbitmq.connect()
+    # Start Discovery Service
+    await discovery_service.start_periodic_discovery()
     yield
+    # Stop Discovery Service
+    await discovery_service.stop_periodic_discovery()
     # Cleanup RabbitMQ
     await rabbitmq.close()
 

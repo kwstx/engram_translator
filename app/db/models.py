@@ -54,6 +54,7 @@ class AgentRegistry(SQLModel, table=True):
     )
     endpoint_url: str = Field(nullable=False)
     last_seen: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = Field(default=True)
 
 class SemanticOntology(SQLModel, table=True):
     __tablename__ = "semantic_ontology"

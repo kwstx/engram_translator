@@ -26,6 +26,6 @@ class Settings(BaseSettings):
     def RABBIT_URL(self) -> str:
         return f"amqp://{self.RABBITMQ_USER}:{self.RABBIT_PASSWORD}@{self.RABBIT_HOST}:{self.RABBIT_PORT}/"
 
-    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
+    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 
 settings = Settings()
