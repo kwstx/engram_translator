@@ -1,224 +1,172 @@
 # Agent Translator Middleware
 
-Neutral translation service that bridges A2A, MCP, and ACP protocols with semantic mapping, task orchestration, and agent discovery.
+A middleware service that acts as a bridge between AI agents using different communication protocols (A2A, MCP, ACP). It translates the protocol envelope and resolves semantic differences in the data payload so agents can interact regardless of their native protocol.
 
-This README expands on the existing behavior without changing the core intent or flow of the project.
+## Why Agent Translator Middleware?
 
-**Swagger UI**
-Open `http://localhost:8000/docs` for the built-in FastAPI Swagger UI. The OpenAPI JSON is available at `http://localhost:8000/openapi.json`.
+AI agents today are often isolated because they speak different protocols (MCP, ACP, native A2A) and use differing data schemas. This middleware acts as a universal translator, allowing an MCP-based agent to seamlessly hand off a task to an ACP-based agent without either needing to change their underlying code.
 
-**Table of Contents**
-1. Overview
-2. Features
-3. Architecture
-4. Quick Start
-5. Configuration
-6. API Surface
-7. Usage Examples
-8. Observability
-9. Development
-10. Deployment
-11. Troubleshooting
-12. Related Docs
-
-**Overview**
-The middleware acts as a neutral bridge between agents that speak different protocols (A2A, MCP, ACP). It registers agents, discovers compatible collaborators, translates message envelopes, and resolves semantic differences in payloads so tasks can be safely handed off across protocol boundaries.
-
-**Features**
-- Protocol translation and envelope mapping across A2A, MCP, and ACP.
-- Semantic resolution using ontologies and structured mapping rules.
-- Registry and discovery of agents by protocol and semantic tags.
-- Async task queue and agent message leasing for long-running workflows.
-- ML-assisted mapping suggestions on failures (beta endpoint).
-- Prometheus metrics at `/metrics` and structured logging.
-- Global rate limiting (100 req/min/IP) with configurable HTTPS enforcement.
-
-**Architecture**
 ```mermaid
-graph TD
-    Agents["External Agents (A2A/MCP/ACP)"] --> API["FastAPI Gateway"]
-    API --> Discovery["Discovery Service"]
-    API --> Mapper["Protocol Mapper"]
-    Mapper --> Semantic["Semantic Ontology Manager"]
-    API --> Queue["Task + Message Queue"]
-    Queue --> Worker["Task Worker"]
-    Discovery --> DB[("Postgres / Registry DB")]
-    Queue --> DB
-    Semantic --> Cache[("Redis Cache")]
+flowchart LR
+    A[Source Agent\nProtocol: MCP] -->|Task Request| B(Translator\nMiddleware)
+    B -->|Protocol & Semantic Translation| C[Target Agent\nProtocol: A2A]
 ```
 
-**Quick Start**
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+---
 
-**Docker (optional)**
+## Core Features
+
+*   **Protocol Translation:** Converts messages and payloads between A2A, MCP, and ACP formats.
+*   **Semantic Mapping:** Uses OWL ontologies, JSON Schema, and PyDatalog to map data fields between different agent schemas (e.g., mapping `user_info.name` to `profile.fullname`).
+*   **Agent Registry & Discovery:** Agents register their supported protocols and semantic capabilities. Other agents can query the registry to discover compatible collaborators based on calculated matching scores.
+*   **Async Orchestration:** Uses task queues and worker processes to handle multi-turn agent handoffs, message leases, and retries.
+*   **Fallback Mapping:** Implements a machine learning model to suggest field mappings when default semantic rules fail.
+
+---
+
+## Quick Start
+
+The standard way to run the middleware with its dependencies (PostgreSQL, Redis) is using Docker Compose.
+
 ```bash
 docker compose up --build
 ```
 
-**Configuration**
-All settings are loaded from environment variables (and `.env` when present). Defaults are shown below.
+Once running, the Swagger UI API documentation is available at:  
+`http://localhost:8000/docs`
 
-Core:
-- `ENVIRONMENT` (default: `development`)
-- `LOG_LEVEL` (default: `INFO`)
-- `HTTPS_ONLY` (default: `false`)
+---
 
-Auth:
-- `AUTH_ISSUER` (default: `https://auth.example.com/`)
-- `AUTH_AUDIENCE` (default: `translator-middleware`)
-- `AUTH_JWT_ALGORITHM` (default: `HS256`)
-- `AUTH_JWT_SECRET` (required for HS* algorithms)
-- `AUTH_JWT_PUBLIC_KEY` (required for RS*/ES* algorithms)
+## Authentication Prerequisites
 
-Database:
-- `DATABASE_URL` (optional; when set, it is normalized to `postgresql+asyncpg://`)
-- `POSTGRES_SERVER` (default: `db`)
-- `POSTGRES_USER` (default: `admin`)
-- `POSTGRES_PASSWORD` (default: `password`)
-- `POSTGRES_DB` (default: `translator_db`)
+Some endpoints (such as message translation) require a JSON Web Token (JWT) for authorization. Ensure you have your token configured and that its issuer and audience match the `AUTH_ISSUER` and `AUTH_AUDIENCE` environment variables. For local testing, you can use the built-in development utilities to mock or mint a token.
 
-Queue + leasing:
-- `TASK_POLL_INTERVAL_SECONDS` (default: `2`)
-- `TASK_LEASE_SECONDS` (default: `60`)
-- `TASK_MAX_ATTEMPTS` (default: `5`)
-- `AGENT_MESSAGE_LEASE_SECONDS` (default: `60`)
-- `AGENT_MESSAGE_MAX_ATTEMPTS` (default: `5`)
+---
 
-Redis + semantic cache:
-- `REDIS_ENABLED` (default: `true`)
-- `REDIS_HOST` (default: `redis`)
-- `REDIS_PORT` (default: `6379`)
-- `REDIS_DB` (default: `0`)
-- `REDIS_PASSWORD` (optional)
-- `REDIS_URL` (optional, overrides host/port/db/password)
-- `REDIS_CONNECT_TIMEOUT_SECONDS` (default: `0.2`)
-- `REDIS_SOCKET_TIMEOUT_SECONDS` (default: `0.2`)
-- `SEMANTIC_CACHE_TTL_SECONDS` (default: `600`)
+## Usage Examples
 
-ML mapping assistance:
-- `ML_ENABLED` (default: `true`)
-- `ML_MODEL_PATH` (default: `app/semantic/models/mapping_model.joblib`)
-- `ML_MIN_TRAIN_SAMPLES` (default: `20`)
-- `ML_AUTO_APPLY_THRESHOLD` (default: `0.85`)
-- `MAPPING_FAILURE_MAX_FIELDS` (default: `50`)
-- `MAPPING_FAILURE_PAYLOAD_MAX_KEYS` (default: `50`)
+Here is a typical workflow to connect two isolated agents using the middleware API.
 
-**Security Notes**
-- JWT authentication is required for `/api/v1/translate` with scope `translate:a2a`.
-- Beta translation requires scope `translate:beta`.
-- Tokens must be issued by your auth service and validated via `AUTH_ISSUER` and `AUTH_AUDIENCE`.
-- Rate limiting is enabled globally at 100 requests per minute per IP.
-- In production, terminate TLS and enable HTTPS redirect (`HTTPS_ONLY=true`).
+### 1. Register the Scheduling Agent
+Add an agent to the registry, defining its supported protocols and capabilities.
 
-**Generate a Test JWT**
-Use the helper script to mint a short-lived token for local or staging testing:
 ```bash
-python scripts/generate_token.py --issuer https://auth.local/ --audience translator-middleware --subject test-user
-```
-Set `AUTH_JWT_SECRET` in your environment (or pass `--secret`) to match the API's configuration.
-
-**API Surface**
-Health + observability:
-- `GET /` health check
-- `GET /metrics` Prometheus metrics
-
-Registry + discovery:
-- `POST /api/v1/register` register an agent
-- `GET /api/v1/discover` discover agents by protocol
-- `POST /api/v1/discovery` discover agents by protocols and semantic tags
-- `GET /api/v1/discovery/collaborators` ranked collaborator search by compatibility score
-
-Translation:
-- `POST /api/v1/translate` scoped translation endpoint
-- `POST /api/v1/beta/translate` beta endpoint with failure logging + ML suggestions
-
-Queue + leasing:
-- `POST /api/v1/queue/enqueue` enqueue a translation task
-- `POST /api/v1/agents/{agent_id}/messages/poll` lease next message for agent
-- `POST /api/v1/agents/messages/{message_id}/ack` acknowledge a leased message
-
-Ontology:
-- `POST /api/v1/ontology/upload` upload RDF/XML ontology and load in memory
-
-**Usage Examples (Integrating Agents)**
-Register an agent in the registry:
-```bash
-curl -X POST http://localhost:8000/api/v1/register ^
-  -H "Content-Type: application/json" ^
+curl -X POST http://localhost:8000/api/v1/register \
+  -H "Content-Type: application/json" \
   -d "{\"agent_id\":\"agent-a\",\"endpoint_url\":\"http://agent-a:8080\",\"supported_protocols\":[\"a2a\"],\"semantic_tags\":[\"scheduling\"],\"is_active\":true}"
 ```
 
-Translate a message between protocols:
-```bash
-curl -X POST http://localhost:8000/api/v1/translate ^
-  -H "Authorization: Bearer <JWT>" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"source_agent\":\"agent-a\",\"target_agent\":\"agent-b\",\"payload\":{\"intent\":\"schedule_meeting\",\"participants\":[\"alice@example.com\",\"bob@example.com\"],\"window\":{\"start\":\"2026-03-12T09:00:00Z\",\"end\":\"2026-03-12T11:00:00Z\"},\"timezone\":\"UTC\"}}"
+**Example Response:**
+```json
+{
+  "message": "Agent agent-a registered successfully",
+  "status": "active"
+}
 ```
 
-Enqueue a task for asynchronous translation:
+### 2. Discover a Compatible Collaborator
+Search the registry for available agents that match specific protocols or semantic requirements (e.g., finding an agent that can handle scheduling).
+
 ```bash
-curl -X POST http://localhost:8000/api/v1/queue/enqueue ^
-  -H "Content-Type: application/json" ^
-  -d "{\"source_message\":{\"intent\":\"summarize\",\"content\":\"Summarize the attached report.\"},\"source_protocol\":\"a2a\",\"target_protocol\":\"mcp\",\"target_agent_id\":\"9b6c2c9b-7c8e-4f5b-9f3e-2a9cfa45c3b1\"}"
+curl -X GET "http://localhost:8000/api/v1/discovery/collaborators"
 ```
 
-Agent polling and acknowledgement:
-```bash
-curl -X POST http://localhost:8000/api/v1/agents/9b6c2c9b-7c8e-4f5b-9f3e-2a9cfa45c3b1/messages/poll
-curl -X POST http://localhost:8000/api/v1/agents/messages/<message_id>/ack
+**Example Response:**
+```json
+{
+  "collaborators": [
+    {
+      "agent_id": "agent-a",
+      "supported_protocols": ["a2a"],
+      "compatibility_score": 0.95
+    }
+  ]
+}
 ```
 
-**Observability**
-- Prometheus metrics are exposed at `GET /metrics`.
-- Logs are structured (see `LOG_LEVEL`) and emitted at application startup, discovery cycles, and task worker lifecycle.
+### 3. Send a Meeting Request Across Protocols
+Send a message from a source agent to a target agent. The middleware receives the request, translates the protocol and payload, and forwards it to the target.
 
-**Performance Notes**
-- The database engine uses `asyncpg` via SQLAlchemy async engine for high-concurrency workloads.
-- Semantic ontology lookups are cached in Redis to reduce repeated OWL searches.
-- Profile the semantic mapper:
+*(Note: Requires a Bearer token in the Authorization header as described in the Prerequisites)*
+
 ```bash
-python -m app.semantic.profile_semantic_mapper --iterations 500
-python -m app.semantic.profile_semantic_mapper --resolver --iterations 200
+curl -X POST http://localhost:8000/api/v1/translate \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"source_agent\":\"agent-b\",\"target_agent\":\"agent-a\",\"payload\":{\"intent\":\"schedule_meeting\"}}"
 ```
 
-**Development**
-Recommended local workflow:
+**Example Response:**
+```json
+{
+  "status": "success",
+  "source_protocol": "mcp",
+  "target_protocol": "a2a",
+  "translated_payload": {
+    "action": "book_calendar",
+    "details": "meeting"
+  },
+  "delivery_status": "forwarded"
+}
+```
+
+---
+
+## Configuration
+
+Configuration is managed via environment variables. Create a `.env` file in the root directory for local overrides. 
+
+| Variable | Description |
+| :--- | :--- |
+| `ENVIRONMENT` | Operating environment (`development`, `production`). |
+| `DATABASE_URL` | PostgreSQL connection string. |
+| `REDIS_ENABLED` | Set to `true` to use Redis for semantic cache. |
+| `AUTH_ISSUER` | Expected JWT issuer for validation. |
+| `AUTH_AUDIENCE` | Expected JWT audience for validation. |
+| `AUTH_JWT_SECRET` | Secret key required for JWT verification. |
+
+---
+
+## Local Development Setup
+
+To run the application directly on your machine without Docker:
+
 ```bash
+# 1. Create and activate a virtual environment
 python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Start the application
 uvicorn app.main:app --reload
 ```
 
-Run tests:
+Run test suite:
 ```bash
 pytest -q
 ```
 
-Project layout (high level):
-- `app/` FastAPI app, services, semantic mapping, orchestration, DB models
-- `scripts/` helper scripts (JWT generator, utilities)
-- `monitoring/` dashboards and Kubernetes manifests
-- `tests/` unit/integration tests
-- `ARCHITECTURE.md` system design and component details
-- `DEPLOYMENT.md` Render + Cloud Run deployment guides
+---
 
-**Deployment**
-See `DEPLOYMENT.md` for Render (free tier) and Cloud Run instructions. The included `render.yaml` and `Dockerfile` are used for reproducible builds.
+## Troubleshooting
 
-**Troubleshooting**
-- `401` or `403` on `/api/v1/translate`: ensure JWT scope includes `translate:a2a` and issuer/audience match `AUTH_ISSUER` + `AUTH_AUDIENCE`.
-- `Translation failed; mapping failures logged.`: check ML suggestions and mapping failure logs; consider updating ontologies or mappings.
-- Redis connection errors: verify `REDIS_*` values or set `REDIS_ENABLED=false` for local testing.
-- Postgres connection errors: verify `DATABASE_URL` or `POSTGRES_*` values. If your URL includes `sslmode=require`, it is normalized to `ssl=true` for asyncpg.
+*   **HTTP 401/403 on Translation**: Ensure an `Authorization: Bearer <TOKEN>` header is provided. The token's issuer and audience must match your `AUTH_ISSUER` and `AUTH_AUDIENCE` settings.
+*   **Translation/Mapping Errors**: Check the application logs. If the semantic engine fails to map fields, check the ML fallback suggestions in the logs or upload an updated ontology file.
+*   **Database Connection Failed**: Ensure PostgreSQL is running and the `DATABASE_URL` is set correctly.
 
-**Related Docs**
-- `ARCHITECTURE.md`
-- `DEPLOYMENT.md`
-- `MISSION.md`
+---
+
+## Documentation
+
+*   [Architecture (ARCHITECTURE.md)](ARCHITECTURE.md): System components, data silos resolution, and overall architecture.
+*   [Deployment (DEPLOYMENT.md)](DEPLOYMENT.md): Instructions for deploying to Render and Cloud Run.
+
+---
+
+## What's Next?
+
+*   **Explore the API:** Once running, visit `http://localhost:8000/docs` to interact with the full Swagger UI.
+*   **Customize Semantics:** Define your own custom semantic mapping rules (OWL/PyDatalog) to handle specific data structures required by your proprietary agents.
+*   **Contribute:** Check the [Architecture](ARCHITECTURE.md) to understand the internals and start contributing to the core orchestration engine.
