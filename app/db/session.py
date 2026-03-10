@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, create_engine
@@ -6,11 +7,22 @@ from app.core.config import settings
 from typing import AsyncGenerator
 
 # Prevent libpq-style env vars from leaking into asyncpg
-os.environ.pop("PGSSLMODE", None)
-os.environ.pop("PGCHANNELBINDING", None)
+for key in ("PGSSLMODE", "PGCHANNELBINDING", "PGSSLROOTCERT", "PGSSLCERT", "PGSSLKEY", "PGSSLCRL"):
+    os.environ.pop(key, None)
+
+def _sanitize_db_url(url: str) -> str:
+    parts = urlsplit(url)
+    raw_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    cleaned_pairs = []
+    for key, value in raw_pairs:
+        key_clean = key.strip().lower()
+        if key_clean in {"sslmode", "channel_binding", "sslrootcert", "sslcert", "sslkey", "sslcrl"}:
+            continue
+        cleaned_pairs.append((key.strip(), value.strip().strip("\"'")))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(cleaned_pairs), parts.fragment))
 
 # Use SQLModel engines for compatibility
-engine = create_async_engine(settings.DATABASE_URL, echo=True, future=True)
+engine = create_async_engine(_sanitize_db_url(settings.DATABASE_URL), echo=True, future=True)
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async_session = sessionmaker(
