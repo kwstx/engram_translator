@@ -18,6 +18,23 @@ Environment variables:
 - `TASK_MAX_ATTEMPTS` (default: `5`)
 - `AGENT_MESSAGE_LEASE_SECONDS` (default: `60`)
 - `AGENT_MESSAGE_MAX_ATTEMPTS` (default: `5`)
+- `REDIS_ENABLED` (default: `true`)
+- `REDIS_HOST` (default: `redis`)
+- `REDIS_PORT` (default: `6379`)
+- `REDIS_DB` (default: `0`)
+- `REDIS_PASSWORD` (optional)
+- `REDIS_URL` (optional, overrides host/port/db/password)
+- `SEMANTIC_CACHE_TTL_SECONDS` (default: `600`)
+
+Performance:
+- The database engine uses `asyncpg` via SQLAlchemy async engine for high-concurrency workloads.
+- Semantic ontology lookups are cached in Redis to reduce repeated OWL searches.
+- Profile SemanticMapper with cProfile:
+
+```bash
+python -m app.semantic.profile_semantic_mapper --iterations 500
+python -m app.semantic.profile_semantic_mapper --resolver --iterations 200
+```
 
 Queue API:
 - `POST /api/v1/queue/enqueue` enqueues a translation task.

@@ -70,3 +70,14 @@ curl https://<cloud-run-url>/
 ```
 
 To call queue endpoints, send a valid JWT with the required issuer/audience.
+
+## 6) Kubernetes horizontal scaling (CPU-based)
+
+If you deploy to Kubernetes, apply the sample manifests to scale replicas based on CPU usage thresholds:
+
+```bash
+kubectl apply -f monitoring/k8s/translator-deployment.yaml
+kubectl apply -f monitoring/k8s/translator-hpa.yaml
+```
+
+Adjust `averageUtilization` in `monitoring/k8s/translator-hpa.yaml` to change the CPU threshold.

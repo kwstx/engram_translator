@@ -14,6 +14,17 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "admin"
     POSTGRES_PASSWORD: str = "password"
     POSTGRES_DB: str = "translator_db"
+
+    # Redis
+    REDIS_ENABLED: bool = True
+    REDIS_HOST: str = "redis"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_URL: Optional[str] = None
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 0.2
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = 0.2
+    SEMANTIC_CACHE_TTL_SECONDS: int = 600
     
     DATABASE_URL: Optional[str] = None
 
@@ -48,6 +59,20 @@ class Settings(BaseSettings):
         ):
             self.DATABASE_URL = self.DATABASE_URL.replace(
                 "postgresql://", "postgresql+asyncpg://", 1
+            )
+
+        if not self.REDIS_ENABLED:
+            self.REDIS_URL = None
+            return self
+
+        if self.REDIS_URL == "":
+            self.REDIS_URL = None
+            return self
+
+        if not self.REDIS_URL:
+            password = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+            self.REDIS_URL = (
+                f"redis://{password}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
             )
         return self
 

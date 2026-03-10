@@ -18,3 +18,4 @@ slowapi>=0.1.9
 structlog>=24.1.0
 fastapi-prometheus-middleware>=1.0.0
 prometheus_client>=0.20.0
+redis>=5.0.0

@@ -3,6 +3,8 @@ import os
 import structlog
 import jsonschema
 from pyDatalog import pyDatalog
+from app.core.config import settings
+from app.core.redis import get_redis_client
 pyDatalog.create_terms('X, Y, map_field')
 
 logger = structlog.get_logger(__name__)
@@ -16,6 +18,8 @@ class SemanticMapper:
         self.world = World()
         self.ontology_path = ontology_path
         self.ontology = None
+        self.redis = get_redis_client()
+        self.cache_ttl_seconds = settings.SEMANTIC_CACHE_TTL_SECONDS
         
         if ontology_path:
             self.load_ontology(ontology_path)
@@ -44,6 +48,11 @@ class SemanticMapper:
         if not self.ontology:
             return f"Error: Ontology not loaded."
 
+        cache_key = f"semantic:equivalent:{source_protocol}:{concept}"
+        cached_value = self._cache_get(cache_key)
+        if cached_value:
+            return cached_value
+
         namespaces = {
             "A2A": "http://agent.middleware.org/A2A#",
             "MCP": "http://agent.middleware.org/MCP#",
@@ -60,7 +69,9 @@ class SemanticMapper:
         if not source_concept:
             source_concept = self.world.search_one(name=concept)
             if not source_concept:
-                return f"Concept '{concept}' not found."
+                result = f"Concept '{concept}' not found."
+                self._cache_set(cache_key, result)
+                return result
 
         equivalents = []
         if hasattr(source_concept, "equivalent_to"):
@@ -74,16 +85,22 @@ class SemanticMapper:
                     equivalents.append(cls)
 
         if not equivalents:
-            return f"No equivalents found for {source_protocol}:{concept}"
+            result = f"No equivalents found for {source_protocol}:{concept}"
+            self._cache_set(cache_key, result)
+            return result
 
         for eq in equivalents:
             eq_iri = str(eq.iri)
             for proto, ns in namespaces.items():
                 if eq_iri.startswith(ns) and proto != source_protocol and proto != "BASE":
                     concept_name = eq_iri.replace(ns, "")
-                    return f"{proto}:{concept_name}"
+                    result = f"{proto}:{concept_name}"
+                    self._cache_set(cache_key, result)
+                    return result
 
-        return f"Equivalents found but none in target protocols: {[str(e.iri) for e in equivalents]}"
+        result = f"Equivalents found but none in target protocols: {[str(e.iri) for e in equivalents]}"
+        self._cache_set(cache_key, result)
+        return result
 
     def DataSiloResolver(self, source_data: dict, source_schema: dict, target_schema: dict, source_protocol: str, target_protocol: str) -> dict:
         """
@@ -151,6 +168,23 @@ class SemanticMapper:
             else:
                 items.append((new_key, v))
         return dict(items)
+
+    def _cache_get(self, key: str) -> str | None:
+        if not self.redis:
+            return None
+        try:
+            return self.redis.get(key)
+        except Exception as exc:
+            logger.warning("Redis cache get failed", key=key, error=str(exc))
+            return None
+
+    def _cache_set(self, key: str, value: str) -> None:
+        if not self.redis:
+            return
+        try:
+            self.redis.setex(key, self.cache_ttl_seconds, value)
+        except Exception as exc:
+            logger.warning("Redis cache set failed", key=key, error=str(exc))
 
 if __name__ == "__main__":
     # Quick test
