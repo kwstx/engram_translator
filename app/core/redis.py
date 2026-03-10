@@ -1,14 +1,27 @@
+from __future__ import annotations
+
 from functools import lru_cache
-import redis
+from typing import TYPE_CHECKING
+
+try:
+    import redis as redis_lib
+except Exception:
+    redis_lib = None
+
+if TYPE_CHECKING:
+    from redis import Redis
 from app.core.config import settings
 
 
 @lru_cache
-def get_redis_client() -> redis.Redis | None:
+def get_redis_client() -> Redis | None:
     if not settings.REDIS_URL:
         return None
 
-    return redis.Redis.from_url(
+    if redis_lib is None:
+        return None
+
+    return redis_lib.Redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
