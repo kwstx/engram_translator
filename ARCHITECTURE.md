@@ -69,7 +69,7 @@ graph TD
 ## 4. Deployment & Scalability (Docker)
 The architecture is designed as a set of containerized microservices:
 - **Scalability**: Each service can scale independently based on throughput (e.g., more Protocol Mapper instances during high traffic).
-- **Communication**: Services communicate via a high-performance message bus (like NATS or RabbitMQ) or gRPC for low latency.
+- **Communication**: Services communicate via SQL-backed task and message queues or gRPC for low latency.
 - **Isolation**: Each protocol handler can be updated without affecting the core orchestration logic.
 
 ## 5. Data Flow Example

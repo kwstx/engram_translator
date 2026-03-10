@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import PostgresDsn, AmqpDsn, computed_field
+from pydantic import model_validator
 from typing import Optional
 
 class Settings(BaseSettings):
@@ -15,19 +15,14 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "password"
     POSTGRES_DB: str = "translator_db"
     
-    @computed_field
-    def DATABASE_URL(self) -> str:
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+    DATABASE_URL: Optional[str] = None
 
-    # RabbitMQ
-    RABBITMQ_USER: str = "user"
-    RABBIT_PASSWORD: str = "password"
-    RABBIT_HOST: str = "rabbitmq"
-    RABBIT_PORT: int = 5672
-    
-    @computed_field
-    def RABBIT_URL(self) -> str:
-        return f"amqp://{self.RABBITMQ_USER}:{self.RABBIT_PASSWORD}@{self.RABBIT_HOST}:{self.RABBIT_PORT}/"
+    # Task queue (SQL-backed)
+    TASK_POLL_INTERVAL_SECONDS: float = 2.0
+    TASK_LEASE_SECONDS: int = 60
+    TASK_MAX_ATTEMPTS: int = 5
+    AGENT_MESSAGE_LEASE_SECONDS: int = 60
+    AGENT_MESSAGE_MAX_ATTEMPTS: int = 5
 
     # Auth
     AUTH_ISSUER: str = "https://auth.example.com/"
@@ -37,5 +32,23 @@ class Settings(BaseSettings):
     AUTH_JWT_PUBLIC_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _finalize_database_url(self):
+        if not self.DATABASE_URL:
+            self.DATABASE_URL = (
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+            )
+        elif self.DATABASE_URL.startswith("postgres://"):
+            self.DATABASE_URL = "postgresql+asyncpg://" + self.DATABASE_URL[len("postgres://") :]
+        elif (
+            self.DATABASE_URL.startswith("postgresql://")
+            and "+asyncpg" not in self.DATABASE_URL
+        ):
+            self.DATABASE_URL = self.DATABASE_URL.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+        return self
 
 settings = Settings()

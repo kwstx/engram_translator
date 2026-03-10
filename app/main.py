@@ -1,17 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
-from sqlmodel import Session, select
 from app.api.v1 import endpoints, discovery
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import init_db
-from app.messaging.events import rabbitmq
+from app.services.task_worker import TaskWorker
 from contextlib import asynccontextmanager
-from typing import List, Dict, Any
 from fastapi_prometheus_middleware import PrometheusMiddleware, metrics
 
 from app.services.discovery import DiscoveryService
@@ -19,20 +17,21 @@ from app.services.discovery import DiscoveryService
 configure_logging()
 
 discovery_service = DiscoveryService()
+task_worker = TaskWorker()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB (create tables if they don't exist)
     await init_db()
-    # Initialize RabbitMQ
-    await rabbitmq.connect()
     # Start Discovery Service
     await discovery_service.start_periodic_discovery()
+    # Start Task Worker
+    await task_worker.start()
     yield
+    # Stop Task Worker
+    await task_worker.stop()
     # Stop Discovery Service
     await discovery_service.stop_periodic_discovery()
-    # Cleanup RabbitMQ
-    await rabbitmq.close()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

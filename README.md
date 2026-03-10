@@ -13,3 +13,13 @@ Environment variables:
 - `AUTH_JWT_SECRET` (required for HS* algorithms)
 - `AUTH_JWT_PUBLIC_KEY` (required for RS*/ES* algorithms)
 - `HTTPS_ONLY` (default: `false`)
+- `TASK_POLL_INTERVAL_SECONDS` (default: `2`)
+- `TASK_LEASE_SECONDS` (default: `60`)
+- `TASK_MAX_ATTEMPTS` (default: `5`)
+- `AGENT_MESSAGE_LEASE_SECONDS` (default: `60`)
+- `AGENT_MESSAGE_MAX_ATTEMPTS` (default: `5`)
+
+Queue API:
+- `POST /api/v1/queue/enqueue` enqueues a translation task.
+- `POST /api/v1/agents/{agent_id}/messages/poll` leases the next message for an agent.
+- `POST /api/v1/agents/messages/{message_id}/ack` acknowledges a leased message.

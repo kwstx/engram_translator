@@ -9,7 +9,6 @@ services:
       - .env
     depends_on:
       - db
-      - rabbitmq
     networks:
       - agent_network
 
@@ -24,17 +23,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - agent_network
-
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-user}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-password}
     networks:
       - agent_network
 

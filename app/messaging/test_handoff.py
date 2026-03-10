@@ -4,38 +4,7 @@ Tests for the ProtocolGraph and Orchestrator.handoff() multi-hop routing.
 Run with:
     python -m pytest app/messaging/test_handoff.py -v
 """
-import sys
-import os
 import pytest
-
-# ---------------------------------------------------------------------------
-# Minimal stubs so we can import without a live RabbitMQ / Postgres
-# ---------------------------------------------------------------------------
-# Patch pika before importing the orchestrator
-import types
-
-_pika_stub = types.ModuleType("pika")
-_pika_stub.BlockingConnection = type("BlockingConnection", (), {})
-_pika_stub.URLParameters = lambda url: url
-_pika_stub.BasicProperties = lambda **kw: None
-
-_blocking_mod = types.ModuleType("pika.adapters.blocking_connection")
-_blocking_mod.BlockingChannel = type("BlockingChannel", (), {})
-_pika_stub.adapters = types.ModuleType("pika.adapters")
-_pika_stub.adapters.blocking_connection = _blocking_mod
-
-sys.modules.setdefault("pika", _pika_stub)
-sys.modules.setdefault("pika.adapters", _pika_stub.adapters)
-sys.modules.setdefault("pika.adapters.blocking_connection", _blocking_mod)
-
-# Patch settings so we don't need a .env / database
-_config_mod = types.ModuleType("app.core.config")
-
-class _FakeSettings:
-    RABBIT_URL = "amqp://guest:guest@localhost:5672/"
-
-_config_mod.settings = _FakeSettings()
-sys.modules["app.core.config"] = _config_mod
 
 # ---------------------------------------------------------------------------
 # Now we can safely import
@@ -153,14 +122,11 @@ class TestOrchestratorHandoff:
     """Tests for the Orchestrator's handoff method."""
 
     def _make_orchestrator(self) -> Orchestrator:
-        """Create an Orchestrator without a live RabbitMQ connection."""
+        """Create an Orchestrator without external dependencies."""
         orch = Orchestrator.__new__(Orchestrator)
-        orch.amqp_url = "amqp://localhost"
         orch.translator = TranslatorEngine()
         orch.protocol_graph = ProtocolGraph()
         orch.protocol_graph.build_from_translator(orch.translator)
-        orch._connection = None
-        orch._channel = None
         return orch
 
     def test_identity_handoff(self):

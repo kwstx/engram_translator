@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, Field, Column
-from sqlalchemy import Enum, ARRAY, String, text
+from sqlalchemy import Enum, ARRAY, String, text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -10,6 +10,18 @@ class ProtocolType(str, enum.Enum):
     A2A = "A2A"
     MCP = "MCP"
     ACP = "ACP"
+
+class TaskStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    LEASED = "LEASED"
+    COMPLETED = "COMPLETED"
+    DEAD_LETTER = "DEAD_LETTER"
+
+class AgentMessageStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    LEASED = "LEASED"
+    ACKED = "ACKED"
+    DEAD_LETTER = "DEAD_LETTER"
 
 class ProtocolMapping(SQLModel, table=True):
     __tablename__ = "protocol_mapping"
@@ -65,3 +77,59 @@ class SemanticOntology(SQLModel, table=True):
     rdf_content: Optional[str] = Field(default=None) # Serialized RDF/XML or Turtle
     description: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class Task(SQLModel, table=True):
+    __tablename__ = "tasks"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_protocol: str = Field(index=True, nullable=False)
+    target_protocol: str = Field(index=True, nullable=False)
+    target_agent_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), index=True, nullable=False)
+    )
+    source_message: Dict[str, Any] = Field(
+        sa_column=Column(JSONB, nullable=False)
+    )
+    status: TaskStatus = Field(
+        default=TaskStatus.PENDING,
+        sa_column=Column(Enum(TaskStatus), index=True, nullable=False),
+    )
+    attempts: int = Field(default=0, nullable=False)
+    max_attempts: int = Field(default=5, nullable=False)
+    lease_owner: Optional[str] = Field(default=None)
+    leased_until: Optional[datetime] = Field(default=None)
+    last_error: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": datetime.utcnow},
+    )
+    completed_at: Optional[datetime] = Field(default=None)
+    dead_lettered_at: Optional[datetime] = Field(default=None)
+
+class AgentMessage(SQLModel, table=True):
+    __tablename__ = "agent_messages"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("tasks.id"), index=True, nullable=False)
+    )
+    agent_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), index=True, nullable=False)
+    )
+    payload: Dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
+    status: AgentMessageStatus = Field(
+        default=AgentMessageStatus.PENDING,
+        sa_column=Column(Enum(AgentMessageStatus), index=True, nullable=False),
+    )
+    attempts: int = Field(default=0, nullable=False)
+    max_attempts: int = Field(default=5, nullable=False)
+    lease_owner: Optional[str] = Field(default=None)
+    leased_until: Optional[datetime] = Field(default=None)
+    last_error: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": datetime.utcnow},
+    )
+    acked_at: Optional[datetime] = Field(default=None)
