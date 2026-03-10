@@ -24,5 +24,6 @@ async def init_db():
             SemanticOntology,
             Task,
             AgentMessage,
+            MappingFailureLog,
         )
         await conn.run_sync(SQLModel.metadata.create_all)

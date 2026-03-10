@@ -10,6 +10,7 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/auth/token",
     scopes={
         "translate:a2a": "Translate messages using A2A protocol scope.",
+        "translate:beta": "Access beta translation endpoints for enterprise users.",
     },
 )
 

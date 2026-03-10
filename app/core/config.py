@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     REDIS_CONNECT_TIMEOUT_SECONDS: float = 0.2
     REDIS_SOCKET_TIMEOUT_SECONDS: float = 0.2
     SEMANTIC_CACHE_TTL_SECONDS: int = 600
+
+    # ML mapping suggestions
+    ML_ENABLED: bool = True
+    ML_MODEL_PATH: str = "app/semantic/models/mapping_model.joblib"
+    ML_MIN_TRAIN_SAMPLES: int = 20
+    ML_AUTO_APPLY_THRESHOLD: float = 0.85
+    MAPPING_FAILURE_MAX_FIELDS: int = 50
+    MAPPING_FAILURE_PAYLOAD_MAX_KEYS: int = 50
     
     DATABASE_URL: Optional[str] = None
 

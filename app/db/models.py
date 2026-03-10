@@ -152,3 +152,21 @@ class AgentMessage(SQLModel, table=True):
         sa_column_kwargs={"onupdate": datetime.utcnow},
     )
     acked_at: Optional[datetime] = Field(default=None)
+
+
+class MappingFailureLog(SQLModel, table=True):
+    __tablename__ = "mapping_failure_logs"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_protocol: str = Field(index=True, nullable=False)
+    target_protocol: str = Field(index=True, nullable=False)
+    source_field: str = Field(index=True, nullable=False)
+    payload_excerpt: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb")),
+    )
+    error_type: str = Field(nullable=False)
+    model_suggestion: Optional[str] = Field(default=None)
+    model_confidence: Optional[float] = Field(default=None)
+    applied: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

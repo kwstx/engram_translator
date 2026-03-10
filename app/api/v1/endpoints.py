@@ -18,8 +18,16 @@ from app.core.security import require_scopes
 from app.core.metrics import record_translation_error, record_translation_success
 from app.core.config import settings
 from app.services.queue import lease_agent_message
+from app.messaging.orchestrator import Orchestrator
+from app.services.mapping_failures import (
+    extract_fields,
+    extract_payload_excerpt,
+    log_mapping_failure,
+    apply_ml_suggestion,
+)
 
 router = APIRouter(dependencies=[require_scopes([])])
+_beta_orchestrator = Orchestrator()
 
 @router.post(
     "/register",
@@ -109,6 +117,45 @@ class TranslateResponse(BaseModel):
         }
     )
 
+class BetaTranslateRequest(BaseModel):
+    source_protocol: str = Field(..., description="Source protocol identifier.")
+    target_protocol: str = Field(..., description="Target protocol identifier.")
+    payload: Dict[str, Any] = Field(..., description="Protocol-specific payload.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "source_protocol": "A2A",
+                    "target_protocol": "MCP",
+                    "payload": {
+                        "payload": {
+                            "intent": "dispatch",
+                            "delivery_window": {
+                                "start": "2026-03-12T09:00:00Z",
+                                "end": "2026-03-12T11:00:00Z",
+                            },
+                        }
+                    },
+                }
+            ]
+        }
+    )
+
+
+class MappingSuggestion(BaseModel):
+    source_field: str
+    suggestion: str | None = None
+    confidence: float | None = None
+    applied: bool = False
+
+
+class BetaTranslateResponse(TranslateResponse):
+    mapping_suggestions: List[MappingSuggestion] = Field(
+        default_factory=list,
+        description="ML-generated mapping suggestions captured during failures.",
+    )
+
 
 @router.post(
     "/translate",
@@ -139,6 +186,72 @@ async def translate_message(
     except Exception:
         record_translation_error("api")
         raise
+
+
+@router.post(
+    "/beta/translate",
+    response_model=BetaTranslateResponse,
+    tags=["Beta"],
+    summary="Beta translate endpoint for enterprise users",
+    description="Enterprise beta endpoint that logs failed mappings and attaches ML suggestions.",
+)
+async def beta_translate_message(
+    request: BetaTranslateRequest,
+    db: Session = Depends(get_session),
+    _principal: Dict[str, Any] = require_scopes(["translate:beta"]),
+):
+    try:
+        result = _beta_orchestrator.handoff(
+            request.payload, request.source_protocol, request.target_protocol
+        )
+        record_translation_success(
+            "beta", request.source_protocol.upper(), request.target_protocol.upper()
+        )
+        return BetaTranslateResponse(
+            status="success",
+            message=(
+                f"Translated message from {request.source_protocol} "
+                f"to {request.target_protocol}"
+            ),
+            payload=result.translated_message,
+            mapping_suggestions=[],
+        )
+    except Exception as exc:
+        fields = extract_fields(request.payload, settings.MAPPING_FAILURE_MAX_FIELDS)
+        payload_excerpt = extract_payload_excerpt(
+            request.payload, settings.MAPPING_FAILURE_PAYLOAD_MAX_KEYS
+        )
+        suggestions: List[MappingSuggestion] = []
+        logs = []
+        for field in fields:
+            entry = await log_mapping_failure(
+                db,
+                source_protocol=request.source_protocol,
+                target_protocol=request.target_protocol,
+                source_field=field,
+                payload_excerpt=payload_excerpt,
+                error_type=type(exc).__name__,
+            )
+            logs.append(entry)
+
+        for entry in logs:
+            await apply_ml_suggestion(db, entry)
+            suggestions.append(
+                MappingSuggestion(
+                    source_field=entry.source_field,
+                    suggestion=entry.model_suggestion,
+                    confidence=entry.model_confidence,
+                    applied=entry.applied,
+                )
+            )
+        await db.commit()
+        record_translation_error(
+            "beta", request.source_protocol.upper(), request.target_protocol.upper()
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="Translation failed; mapping failures logged.",
+        ) from exc
 
 
 class TaskEnqueueRequest(BaseModel):
