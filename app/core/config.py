@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Agent Translator Middleware"
@@ -67,6 +68,22 @@ class Settings(BaseSettings):
         ):
             self.DATABASE_URL = self.DATABASE_URL.replace(
                 "postgresql://", "postgresql+asyncpg://", 1
+            )
+
+        # asyncpg does not accept sslmode=*, so map it to ssl=true/false.
+        if self.DATABASE_URL and "+asyncpg" in self.DATABASE_URL:
+            parts = urlsplit(self.DATABASE_URL)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            if "ssl" not in query and "sslmode" in query:
+                sslmode = query.pop("sslmode")
+                if sslmode in {"require", "verify-full", "verify-ca"}:
+                    query["ssl"] = "true"
+                elif sslmode in {"disable", "allow", "prefer"}:
+                    query["ssl"] = "false"
+            if "sslmode" in query:
+                query.pop("sslmode")
+            self.DATABASE_URL = urlunsplit(
+                (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
             )
 
         if not self.REDIS_ENABLED:

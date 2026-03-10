@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: translator-middleware
+    env: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: AUTH_JWT_ALGORITHM
+        value: HS256
+      - key: AUTH_ISSUER
+        sync: false
+      - key: AUTH_AUDIENCE
+        sync: false

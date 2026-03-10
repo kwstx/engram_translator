@@ -44,6 +44,13 @@ docker compose up --build
 - Rate limiting is enabled globally at 100 requests per minute per IP.
 - In production, terminate TLS with Let's Encrypt and enable HTTPS redirect (`HTTPS_ONLY=true`).
 
+**Generate a Test JWT**
+Use the helper script to mint a short-lived token for local or staging testing:
+```bash
+python scripts/generate_token.py --issuer https://auth.local/ --audience translator-middleware --subject test-user
+```
+Set `AUTH_JWT_SECRET` in your environment (or pass `--secret`) to match the API's configuration.
+
 **Architecture Diagram**
 ```mermaid
 graph TD

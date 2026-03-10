@@ -1,13 +1,39 @@
-# Free-tier deployment (Cloud Run + Neon)
+# Free-tier deployment (Render + Neon)
 
-This project is configured to run as a container on Google Cloud Run with a free-tier Neon Postgres database.
+This project can be deployed on Render's free tier with auto-deploys from GitHub.
 
 ## 1) Create a Neon database
 
 1. Create a free Neon project and database.
 2. Copy the connection string (e.g. `postgresql://USER:PASSWORD@HOST/DB?sslmode=require`).
 
-## 2) Create GCP resources
+## 2) Deploy on Render
+
+1. Create a Render account and connect your GitHub repo.
+2. Create a new Web Service from this repository.
+3. Render will detect the `render.yaml` and use it for configuration.
+4. Set these environment variables in Render:
+   - `DATABASE_URL`
+   - `AUTH_JWT_SECRET`
+   - `AUTH_ISSUER`
+   - `AUTH_AUDIENCE`
+5. Deploy. Render will build using the `Dockerfile` and run the service.
+
+Render free tier services sleep when idle and may have startup delay.
+Neon connection strings often include `sslmode=require`; the app maps that to `ssl=true` for asyncpg.
+
+## 3) Verify
+
+```bash
+curl https://<render-service-url>/
+```
+
+To call queue endpoints, send a valid JWT with the required issuer/audience.
+
+# Alternative: Cloud Run + Neon
+
+This project can also be deployed to Google Cloud Run.
+## 1) Create GCP resources
 
 ```bash
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
@@ -43,7 +69,7 @@ gcloud iam service-accounts keys create ./gcp-sa-key.json \
   --iam-account "$SA_EMAIL"
 ```
 
-## 3) Add GitHub Secrets
+## 2) Add GitHub Secrets
 
 Set these repository secrets:
 
@@ -56,14 +82,14 @@ Set these repository secrets:
 - `AUTH_ISSUER` = token issuer (e.g. `https://auth.example.com/`)
 - `AUTH_AUDIENCE` = token audience (e.g. `translator-middleware`)
 
-## 4) Deploy
+## 3) Deploy
 
 Push to `main`. The workflow in `.github/workflows/ci-deploy.yml` runs tests and deploys to Cloud Run.
 
 The service is public (`--allow-unauthenticated`) and Cloud Run returns a URL like:
 `https://<service>-<hash>-<region>.a.run.app`.
 
-## 5) Verify
+## 4) Verify
 
 ```bash
 curl https://<cloud-run-url>/
@@ -71,7 +97,7 @@ curl https://<cloud-run-url>/
 
 To call queue endpoints, send a valid JWT with the required issuer/audience.
 
-## 6) Kubernetes horizontal scaling (CPU-based)
+## 5) Kubernetes horizontal scaling (CPU-based)
 
 If you deploy to Kubernetes, apply the sample manifests to scale replicas based on CPU usage thresholds:
 
