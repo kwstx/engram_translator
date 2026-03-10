@@ -5,6 +5,8 @@ from typing import Optional
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Agent Translator Middleware"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
+    HTTPS_ONLY: bool = False
     
     # Postgres
     POSTGRES_SERVER: str = "db"
@@ -25,6 +27,13 @@ class Settings(BaseSettings):
     @computed_field
     def RABBIT_URL(self) -> str:
         return f"amqp://{self.RABBITMQ_USER}:{self.RABBIT_PASSWORD}@{self.RABBIT_HOST}:{self.RABBIT_PORT}/"
+
+    # Auth
+    AUTH_ISSUER: str = "https://auth.example.com/"
+    AUTH_AUDIENCE: str = "translator-middleware"
+    AUTH_JWT_ALGORITHM: str = "HS256"
+    AUTH_JWT_SECRET: Optional[str] = None
+    AUTH_JWT_PUBLIC_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 

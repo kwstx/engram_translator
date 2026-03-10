@@ -6,8 +6,9 @@ from app.messaging.events import rabbitmq
 from app.semantic.ontology_manager import ontology_manager
 from typing import List, Dict, Any
 import uuid
+from app.core.security import require_scopes
 
-router = APIRouter()
+router = APIRouter(dependencies=[require_scopes([])])
 
 @router.post("/register", response_model=AgentRegistry, tags=["Registry"])
 async def register_agent(agent: AgentRegistry, db: Session = Depends(get_session)):
@@ -31,7 +32,13 @@ async def discover_agents(protocol: str = None, capability: str = None, db: Sess
     return results.scalars().all()
 
 @router.post("/translate", tags=["Translation"])
-async def translate_message(source_agent: str, target_agent: str, payload: Dict[str, Any], db: Session = Depends(get_session)):
+async def translate_message(
+    source_agent: str,
+    target_agent: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_session),
+    _principal: Dict[str, Any] = require_scopes(["translate:a2a"]),
+):
     """Translates a message from source agent protocol to target agent protocol."""
     # 1. Look up source and target agents
     # 2. Identify protocol mapping rules

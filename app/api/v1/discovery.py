@@ -5,8 +5,9 @@ from app.db.models import AgentRegistry, ProtocolMapping
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.services.discovery import DiscoveryService
+from app.core.security import require_scopes
 
-router = APIRouter(prefix="/discovery", tags=["Discovery"])
+router = APIRouter(prefix="/discovery", tags=["Discovery"], dependencies=[require_scopes([])])
 
 
 class AgentDiscoveryRequest(BaseModel):

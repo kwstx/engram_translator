@@ -1,4 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from sqlmodel import Session, select
 from app.api.v1 import endpoints, discovery
 from app.core.config import settings
@@ -31,6 +36,14 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+if settings.HTTPS_ONLY:
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 @app.get("/", tags=["Health"])
 async def root():
