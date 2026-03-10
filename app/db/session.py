@@ -1,8 +1,13 @@
+import os
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, create_engine
 from app.core.config import settings
 from typing import AsyncGenerator
+
+# Prevent libpq-style env vars from leaking into asyncpg
+os.environ.pop("PGSSLMODE", None)
+os.environ.pop("PGCHANNELBINDING", None)
 
 # Use SQLModel engines for compatibility
 engine = create_async_engine(settings.DATABASE_URL, echo=True, future=True)
