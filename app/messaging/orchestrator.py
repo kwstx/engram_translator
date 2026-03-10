@@ -1,14 +1,15 @@
 import pika
 import json
-import logging
+import structlog
 import networkx as nx
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from app.core.config import settings
 from app.core.translator import TranslatorEngine
 from app.core.exceptions import HandoffRoutingError
+from app.core.metrics import record_translation_error, record_translation_success
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +76,12 @@ class ProtocolGraph:
         """
         src, tgt = source.upper(), target.upper()
         self._graph.add_edge(src, tgt, weight=weight, meta=metadata or {})
-        logger.debug(f"ProtocolGraph edge added: {src} → {tgt} (w={weight})")
+        logger.debug(
+            "ProtocolGraph edge added",
+            source_protocol=src,
+            target_protocol=tgt,
+            weight=weight,
+        )
 
     def build_from_translator(
         self,
@@ -90,8 +96,9 @@ class ProtocolGraph:
         for src, tgt in translator.supported_pairs:
             self.add_translation_edge(src, tgt, weight=default_weight)
         logger.info(
-            f"ProtocolGraph built with {self._graph.number_of_nodes()} nodes, "
-            f"{self._graph.number_of_edges()} edges"
+            "ProtocolGraph built",
+            node_count=self._graph.number_of_nodes(),
+            edge_count=self._graph.number_of_edges(),
         )
 
     # -- Path-finding -------------------------------------------------------
@@ -234,7 +241,12 @@ class Orchestrator:
 
         # Identity case — no translation needed
         if src == tgt:
-            logger.info(f"Handoff: source and target are both '{src}'; no-op")
+            logger.info(
+                "Handoff: source and target are identical; no-op",
+                source_protocol=src,
+                target_protocol=tgt,
+            )
+            record_translation_success("orchestrator", src, tgt)
             return HandoffResult(
                 translated_message=source_message,
                 route=[src],
@@ -244,7 +256,9 @@ class Orchestrator:
         # Find the optimal route
         path, total_weight = self.protocol_graph.find_shortest_path(src, tgt)
         logger.info(
-            f"Handoff route: {' → '.join(path)} (total weight: {total_weight})"
+            "Handoff route",
+            route=" -> ".join(path),
+            total_weight=total_weight,
         )
 
         # Chain translations along the path
@@ -258,7 +272,13 @@ class Orchestrator:
             edge_data = self.protocol_graph._graph.edges[hop_src, hop_tgt]
             hop_weight = edge_data.get("weight", 1.0)
 
-            logger.info(f"  Hop {i + 1}/{len(path) - 1}: {hop_src} → {hop_tgt}")
+            logger.info(
+                "Handoff hop",
+                hop_index=i + 1,
+                hop_total=len(path) - 1,
+                source_protocol=hop_src,
+                target_protocol=hop_tgt,
+            )
             current_message = self.translator.translate(
                 current_message, hop_src, hop_tgt
             )
@@ -290,9 +310,9 @@ class Orchestrator:
                 parameters = pika.URLParameters(self.amqp_url)
                 self._connection = pika.BlockingConnection(parameters)
                 self._channel = self._connection.channel()
-                logger.info(f"Successfully connected to RabbitMQ at {self.amqp_url}")
+                logger.info("Successfully connected to RabbitMQ", amqp_url=self.amqp_url)
             except Exception as e:
-                logger.error(f"Failed to connect to RabbitMQ: {str(e)}")
+                logger.error("Failed to connect to RabbitMQ", error=str(e))
                 raise
 
     def publish_translated(self, target_agent_id: str, message: Dict[str, Any]):
@@ -314,7 +334,7 @@ class Orchestrator:
                 delivery_mode=2,  # make message persistent
             )
         )
-        logger.info(f"Published translated message to {queue_name}")
+        logger.info("Published translated message", queue=queue_name)
 
     def consume(self, incoming_queue: str = "incoming_tasks"):
         """
@@ -329,7 +349,9 @@ class Orchestrator:
         self._channel.basic_qos(prefetch_count=1)
 
         def callback(ch, method, properties, body):
-            logger.info(f"Received raw message from {incoming_queue}")
+            logger.info("Received raw message", queue=incoming_queue)
+            source_protocol = None
+            target_protocol = None
             try:
                 payload = json.loads(body.decode())
 
@@ -347,29 +369,38 @@ class Orchestrator:
                 target_agent_id = payload.get("target_agent_id")
 
                 if not all([source_message, source_protocol, target_protocol, target_agent_id]):
-                    logger.warning("Message dropped: Missing required fields (source_message, protocols, or target_agent_id)")
+                    logger.warning(
+                        "Message dropped: Missing required fields",
+                        missing_fields=True,
+                    )
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
                 # Use multi-hop handoff (handles direct & chained translations)
                 result = self.handoff(source_message, source_protocol, target_protocol)
-                logger.info(f"Handoff complete via route: {' → '.join(result.route)}")
+                logger.info("Handoff complete", route=" -> ".join(result.route))
 
                 # Forward the translated message to the target agent
                 self.publish_translated(target_agent_id, result.translated_message)
 
                 # Acknowledge receipt after successful forwarding
                 ch.basic_ack(delivery_tag=method.delivery_tag)
-                logger.info(f"Successfully processed and forwarded message for agent {target_agent_id}")
+                logger.info(
+                    "Successfully processed and forwarded message",
+                    target_agent_id=target_agent_id,
+                )
+                record_translation_success("orchestrator", source_protocol, target_protocol)
 
             except Exception as e:
-                logger.error(f"Error processing message: {str(e)}")
+                logger.error("Error processing message", error=str(e))
+                if source_protocol and target_protocol:
+                    record_translation_error("orchestrator", source_protocol, target_protocol)
                 # Nack message. Don't requeue if it's a permanent translation error to avoid infinite loops.
                 # In production, this should go to a Dead Letter Queue (DLQ).
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
         self._channel.basic_consume(queue=incoming_queue, on_message_callback=callback)
-        logger.info(f"Orchestrator started. Listening on queue: {incoming_queue}")
+        logger.info("Orchestrator started", queue=incoming_queue)
         try:
             self._channel.start_consuming()
         except KeyboardInterrupt:
@@ -387,7 +418,8 @@ class Orchestrator:
 
 if __name__ == "__main__":
     # Basic execution block for manual testing/running
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    from app.core.logging import configure_logging
+    configure_logging()
     orchestrator = Orchestrator()
     try:
         orchestrator.consume()

@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: translator
+    type: file
+    folder: Translator
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

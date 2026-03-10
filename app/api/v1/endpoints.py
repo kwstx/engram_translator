@@ -7,6 +7,7 @@ from app.semantic.ontology_manager import ontology_manager
 from typing import List, Dict, Any
 import uuid
 from app.core.security import require_scopes
+from app.core.metrics import record_translation_error, record_translation_success
 
 router = APIRouter(dependencies=[require_scopes([])])
 
@@ -45,11 +46,17 @@ async def translate_message(
     # 3. Apply semantic mapping using ontology_manager
     # 4. Return translated payload or queue it for handoff
     # Placeholder for translation logic
-    return {
-        "status": "pending",
-        "message": f"Translating message from {source_agent} to {target_agent}",
-        "payload": payload
-    }
+    try:
+        response = {
+            "status": "pending",
+            "message": f"Translating message from {source_agent} to {target_agent}",
+            "payload": payload,
+        }
+        record_translation_success("api")
+        return response
+    except Exception:
+        record_translation_error("api")
+        raise
 
 @router.post("/ontology/upload", tags=["Ontology"])
 async def upload_ontology(name: str, rdf_xml: str, db: Session = Depends(get_session)):

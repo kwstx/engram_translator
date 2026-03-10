@@ -1,0 +1,9 @@
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: email-alerts
+    group_by:
+      - alertname
+    routes:
+      - receiver: email-alerts

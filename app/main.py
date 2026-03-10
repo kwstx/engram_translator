@@ -7,12 +7,16 @@ from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from sqlmodel import Session, select
 from app.api.v1 import endpoints, discovery
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.db.session import init_db
 from app.messaging.events import rabbitmq
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
+from fastapi_prometheus_middleware import PrometheusMiddleware, metrics
 
 from app.services.discovery import DiscoveryService
+
+configure_logging()
 
 discovery_service = DiscoveryService()
 
@@ -44,6 +48,13 @@ app.add_middleware(SlowAPIMiddleware)
 
 if settings.HTTPS_ONLY:
     app.add_middleware(HTTPSRedirectMiddleware)
+
+app.add_middleware(
+    PrometheusMiddleware,
+    app_name=settings.PROJECT_NAME,
+    group_paths=True,
+)
+app.add_route("/metrics", metrics)
 
 @app.get("/", tags=["Health"])
 async def root():

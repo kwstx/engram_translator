@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     HTTPS_ONLY: bool = False
+    LOG_LEVEL: str = "INFO"
     
     # Postgres
     POSTGRES_SERVER: str = "db"

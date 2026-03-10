@@ -1,11 +1,11 @@
 from owlready2 import get_ontology, World, Thing
 import os
-import logging
+import structlog
 import jsonschema
 from pyDatalog import pyDatalog
 pyDatalog.create_terms('X, Y, map_field')
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 class SemanticMapper:
     def __init__(self, ontology_path: str = None):
@@ -154,7 +154,8 @@ class SemanticMapper:
 
 if __name__ == "__main__":
     # Quick test
-    logging.basicConfig(level=logging.INFO)
+    from app.core.logging import configure_logging
+    configure_logging()
     try:
         mapper = SemanticMapper("app/semantic/protocols.owl")
         result = mapper.resolve_equivalent("task_handoff", "A2A")

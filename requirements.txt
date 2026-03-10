@@ -17,3 +17,6 @@ aio-pika>=9.4.0
 networkx>=3.2.0
 PyJWT>=2.8.0
 slowapi>=0.1.9
+structlog>=24.1.0
+fastapi-prometheus-middleware>=1.0.0
+prometheus_client>=0.20.0

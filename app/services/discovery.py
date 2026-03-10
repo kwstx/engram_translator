@@ -1,6 +1,6 @@
 import asyncio
 import aiohttp
-import logging
+import structlog
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Set, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from sqlmodel import select
 from app.db.models import AgentRegistry, ProtocolMapping
 from app.db.session import engine
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class DiscoveryService:
@@ -53,7 +53,8 @@ class DiscoveryService:
             return
 
         logger.info(
-            f"DiscoveryService: Starting periodic discovery every {self.ping_interval}s."
+            "DiscoveryService: Starting periodic discovery.",
+            interval_seconds=self.ping_interval,
         )
         self._ping_task = asyncio.create_task(self._ping_agents_loop())
 
@@ -88,7 +89,8 @@ class DiscoveryService:
 
                     if agents:
                         logger.info(
-                            f"DiscoveryService: Pinging {len(agents)} registered agent(s)..."
+                            "DiscoveryService: Pinging registered agents.",
+                            agent_count=len(agents),
                         )
                         async with aiohttp.ClientSession(
                             timeout=self.ping_timeout
@@ -113,7 +115,9 @@ class DiscoveryService:
                 break
             except Exception as e:
                 logger.error(
-                    f"DiscoveryService: Error in ping loop: {e}", exc_info=True
+                    "DiscoveryService: Error in ping loop",
+                    error=str(e),
+                    exc_info=True,
                 )
 
             await asyncio.sleep(self.ping_interval)
@@ -143,15 +147,21 @@ class DiscoveryService:
                 is_active = response.status == 200
         except asyncio.TimeoutError:
             logger.debug(
-                f"DiscoveryService: Ping timed out for agent {agent.agent_id} at {health_url}"
+                "DiscoveryService: Ping timed out for agent",
+                agent_id=str(agent.agent_id),
+                health_url=health_url,
             )
         except aiohttp.ClientError as e:
             logger.debug(
-                f"DiscoveryService: Ping failed for agent {agent.agent_id}: {e}"
+                "DiscoveryService: Ping failed for agent",
+                agent_id=str(agent.agent_id),
+                error=str(e),
             )
         except Exception as e:
             logger.warning(
-                f"DiscoveryService: Unexpected error pinging agent {agent.agent_id}: {e}"
+                "DiscoveryService: Unexpected error pinging agent",
+                agent_id=str(agent.agent_id),
+                error=str(e),
             )
 
         # Update agent status in registry
@@ -163,7 +173,9 @@ class DiscoveryService:
         if previous_status != is_active:
             status_label = "ONLINE" if is_active else "OFFLINE"
             logger.info(
-                f"DiscoveryService: Agent {agent.agent_id} status changed → {status_label}"
+                "DiscoveryService: Agent status changed",
+                agent_id=str(agent.agent_id),
+                status=status_label,
             )
 
     # ------------------------------------------------------------------
@@ -226,9 +238,12 @@ class DiscoveryService:
 
             if score >= min_score:
                 logger.info(
-                    f"DiscoveryService: Collaborator {agent.agent_id} — "
-                    f"score={score:.2f} (shared={len(shared)}, mappable={len(mappable)}, "
-                    f"total={len(target_protocols)})"
+                    "DiscoveryService: Collaborator candidate",
+                    agent_id=str(agent.agent_id),
+                    score=round(score, 2),
+                    shared=len(shared),
+                    mappable=len(mappable),
+                    total=len(target_protocols),
                 )
                 collaborators.append(
                     {

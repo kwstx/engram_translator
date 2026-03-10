@@ -1,9 +1,10 @@
 from typing import Dict, Any, Callable
 from datetime import datetime, date
-import logging
+import structlog
 from app.core.exceptions import ProtocolMismatchError, TranslationError
+from app.core.metrics import record_translation_error, record_translation_success
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 class TranslatorEngine:
     """
@@ -39,16 +40,29 @@ class TranslatorEngine:
         tgt = target_protocol.upper()
         mapping_key = (src, tgt)
 
-        logger.info(f"Translating message from {src} to {tgt}")
+        logger.info("Translating message", source_protocol=src, target_protocol=tgt)
 
         if mapping_key not in self._mappers:
-            logger.error(f"No translation rule found for {src} -> {tgt}")
+            logger.error(
+                "No translation rule found",
+                source_protocol=src,
+                target_protocol=tgt,
+            )
+            record_translation_error("engine", src, tgt)
             raise ProtocolMismatchError(f"No translation rule found for {src} -> {tgt}")
 
         try:
-            return self._mappers[mapping_key](source_message)
+            result = self._mappers[mapping_key](source_message)
+            record_translation_success("engine", src, tgt)
+            return result
         except Exception as e:
-            logger.error(f"Translation failed: {str(e)}")
+            logger.error(
+                "Translation failed",
+                source_protocol=src,
+                target_protocol=tgt,
+                error=str(e),
+            )
+            record_translation_error("engine", src, tgt)
             raise TranslationError(f"Failed to translate message: {str(e)}")
 
     def _translate_a2a_to_mcp(self, message: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,7 +101,8 @@ class TranslatorEngine:
 
 if __name__ == "__main__":
     # Basic verification
-    logging.basicConfig(level=logging.INFO)
+    from app.core.logging import configure_logging
+    configure_logging()
     engine = TranslatorEngine()
     
     test_message = {
