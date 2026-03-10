@@ -69,18 +69,29 @@ class TranslatorEngine:
         """
         Specific mapping rules for A2A to MCP:
         - Transform 'payload' key to 'data_bundle'
+        - Transform 'data.task' to top-level 'coord'
+        - Drop 'protocol' field if present
         - Serialize all date/datetime objects to ISO 8601 format
         """
         translated = {}
         
         for key, value in message.items():
-            # Apply key mapping
-            new_key = "data_bundle" if key == "payload" else key
-            
-            # Apply value transformations (specifically date serialization)
-            new_value = self._process_value(value)
-            
-            translated[new_key] = new_value
+            if key == "protocol":
+                continue
+
+            if key == "payload":
+                translated["data_bundle"] = self._process_value(value)
+                continue
+
+            if key == "data":
+                if isinstance(value, dict) and "task" in value:
+                    translated["coord"] = self._process_value(value["task"])
+                else:
+                    translated["coord"] = self._process_value(value)
+                continue
+
+            # Default passthrough with value normalization
+            translated[key] = self._process_value(value)
             
         return translated
 

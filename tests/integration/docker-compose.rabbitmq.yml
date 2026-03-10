@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5673:5672"
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+
+  mock_sender:
+    image: python:3.11-slim
+    depends_on:
+      - rabbitmq
+    volumes:
+      - ./agents:/scripts:ro
+    environment:
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: password
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+    command: sh -c "pip install pika==1.3.2 && python /scripts/publisher.py"
+
+  mock_receiver:
+    image: python:3.11-slim
+    depends_on:
+      - rabbitmq
+    volumes:
+      - ./agents:/scripts:ro
+      - ./artifacts:/artifacts
+    environment:
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: password
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+    command: sh -c "pip install pika==1.3.2 && python /scripts/receiver.py"
