@@ -17,5 +17,12 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db():
     async with engine.begin() as conn:
         # Import models here to make sure they are registered with SQLModel.metadata
-        from app.db.models import ProtocolMapping, AgentRegistry, SemanticOntology, Task, AgentMessage
+        from app.db.models import (
+            ProtocolMapping,
+            ProtocolVersionDelta,
+            AgentRegistry,
+            SemanticOntology,
+            Task,
+            AgentMessage,
+        )
         await conn.run_sync(SQLModel.metadata.create_all)

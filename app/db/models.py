@@ -45,6 +45,25 @@ class ProtocolMapping(SQLModel, table=True):
         sa_column_kwargs={"onupdate": datetime.utcnow}
     )
 
+class ProtocolVersionDelta(SQLModel, table=True):
+    __tablename__ = "protocol_version_delta"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    protocol: ProtocolType = Field(
+        sa_column=Column(Enum(ProtocolType), index=True, nullable=False)
+    )
+    from_version: str = Field(index=True, nullable=False)
+    to_version: str = Field(index=True, nullable=False)
+    delta_rules: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": datetime.utcnow}
+    )
+
 class AgentRegistry(SQLModel, table=True):
     __tablename__ = "agent_registry"
     

@@ -65,6 +65,33 @@ class TestTranslatorEngine:
         with pytest.raises(TranslationError, match="kaboom"):
             engine.translate({"payload": {}}, "A2A", "MCP")
 
+    def test_version_delta_applies_rename(self):
+        engine = TranslatorEngine()
+        engine.register_delta_mapping(
+            "A2A",
+            "1",
+            "2",
+            {"rename": {"old_field": "new_field"}},
+        )
+
+        msg = {
+            "protocol_version": "v1",
+            "old_field": "legacy",
+            "payload": {"task": "compute"},
+        }
+
+        result = engine.translate(msg, "A2A", "MCP")
+        assert result["new_field"] == "legacy"
+        assert "old_field" not in result
+        assert result["protocol_version"] == "2"
+
+    def test_version_mismatch_without_delta_raises(self):
+        engine = TranslatorEngine()
+        msg = {"protocol_version": "1", "payload": {"task": "compute"}}
+
+        with pytest.raises(TranslationError, match="delta mappings"):
+            engine.translate(msg, "A2A", "MCP")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

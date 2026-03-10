@@ -74,6 +74,7 @@ class TaskWorker:
     async def _process_task(self, session: AsyncSession, task: Task) -> None:
         now = datetime.now(timezone.utc)
         try:
+            await self._orchestrator.translator.refresh_delta_mappings(session)
             result = self._orchestrator.handoff(
                 task.source_message,
                 task.source_protocol,
