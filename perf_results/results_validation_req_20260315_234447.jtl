@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testResults version="1.2">
+<httpSample t="116" it="0" lt="105" ct="74" ts="1773611094672" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="12" ct="0" ts="1773611094814" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="7" it="0" lt="7" ct="0" ts="1773611094828" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611094837" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611094849" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="9" ct="0" ts="1773611094861" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="8" it="0" lt="8" ct="0" ts="1773611094873" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611094882" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="17" it="0" lt="17" ct="0" ts="1773611094895" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611094914" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="9" it="0" lt="9" ct="0" ts="1773611094926" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="9" it="0" lt="9" ct="0" ts="1773611094938" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="9" it="0" lt="8" ct="0" ts="1773611094948" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="8" it="0" lt="8" ct="0" ts="1773611094958" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="11" ct="0" ts="1773611094968" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="13" it="0" lt="13" ct="0" ts="1773611094982" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611094997" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611095009" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611095022" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="12" ct="0" ts="1773611095033" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611095046" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611095058" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="15" it="0" lt="15" ct="0" ts="1773611095071" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="14" it="0" lt="14" ct="0" ts="1773611095088" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="12" ct="0" ts="1773611095105" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="15" it="0" lt="14" ct="0" ts="1773611095119" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="14" it="0" lt="14" ct="0" ts="1773611095136" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="12" ct="0" ts="1773611095152" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="13" it="0" lt="13" ct="0" ts="1773611095165" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="10" it="0" lt="10" ct="0" ts="1773611095179" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="8" it="0" lt="8" ct="0" ts="1773611095190" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="14" it="0" lt="14" ct="0" ts="1773611095199" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="13" it="0" lt="13" ct="0" ts="1773611095214" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611095229" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="7" it="0" lt="7" ct="0" ts="1773611095241" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="12" it="0" lt="12" ct="0" ts="1773611095249" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="15" it="0" lt="15" ct="0" ts="1773611095263" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="13" it="0" lt="12" ct="0" ts="1773611095279" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="9" it="0" lt="9" ct="0" ts="1773611095293" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="9" it="0" lt="9" ct="0" ts="1773611095304" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611095314" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="7" it="0" lt="7" ct="0" ts="1773611095326" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+<httpSample t="11" it="0" lt="11" ct="0" ts="1773611095334" s="false" lb="POST /api/v1/beta/translate" rc="422" rm="Unprocessable Entity" tn="Threads 1-1" dt="text" by="225" sby="503" ng="1" na="1">
+  <responseData class="java.lang.String">{&quot;detail&quot;:[{&quot;type&quot;:&quot;missing&quot;,&quot;loc&quot;:[&quot;body&quot;],&quot;msg&quot;:&quot;Field required&quot;,&quot;input&quot;:null}]}</responseData>
+  <cookies class="java.lang.String"></cookies>
+  <method class="java.lang.String">POST</method>
+  <queryString class="java.lang.String"></queryString>
+  <java.net.URL>http://localhost:8000/api/v1/beta/translate</java.net.URL>
+</httpSample>
+
+</testResults>

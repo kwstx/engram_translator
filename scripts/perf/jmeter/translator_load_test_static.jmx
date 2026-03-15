@@ -56,7 +56,7 @@
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
                 <boolProp name="HTTPArgument.use_equals">false</boolProp>
                 <stringProp name="Argument.name"></stringProp>
-                <stringProp name="Argument.value">{&quot;source_protocol&quot;:&quot;A2A&quot;,&quot;target_protocol&quot;:&quot;MCP&quot;,&quot;payload&quot;:{&quot;id&quot;:&quot;msg_001&quot;,&quot;timestamp&quot;:&quot;2026-03-15T10:00:00Z&quot;,&quot;payload&quot;:{&quot;action&quot;:&quot;thermal_check&quot;,&quot;due_date&quot;:&quot;2026-03-15T12:00:00Z&quot;},&quot;data&quot;:{&quot;task&quot;:{&quot;kind&quot;:&quot;diagnostic&quot;,&quot;priority&quot;:&quot;high&quot;}}}}</stringProp>
+                <stringProp name="Argument.value">${__FileToString(C:/Users/galan/translator_middleware/scripts/perf/jmeter/payload.json,,)}</stringProp>
                 <stringProp name="Argument.metadata"></stringProp>
               </elementProp>
             </collectionProp>
