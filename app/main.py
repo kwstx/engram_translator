@@ -14,6 +14,9 @@ if settings.SENTRY_DSN:
     )
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import structlog
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -30,6 +33,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.services.discovery import DiscoveryService
 
 configure_logging()
+logger = structlog.get_logger(__name__)
 
 discovery_service = DiscoveryService()
 task_worker = TaskWorker()
@@ -55,7 +59,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    logger.error(
+        "Request validation error",
+        path=str(request.url.path),
+        errors=exc.errors(),
+        body=exc.body,
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIMIT_DEFAULT])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)

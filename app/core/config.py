@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     HTTPS_ONLY: bool = False
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: Optional[str] = None
+    RATE_LIMIT_DEFAULT: str = "100/minute"
     
     # Postgres
     POSTGRES_SERVER: str = "db"

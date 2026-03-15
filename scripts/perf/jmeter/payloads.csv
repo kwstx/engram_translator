@@ -1,0 +1,3 @@
+{"source_protocol":"A2A","target_protocol":"MCP","payload":{"id":"msg_001","timestamp":"2026-03-15T10:00:00Z","payload":{"action":"thermal_check","due_date":"2026-03-15T12:00:00Z"},"data":{"task":{"kind":"diagnostic","priority":"high"}}}}
+{"source_protocol":"A2A","target_protocol":"MCP","payload":{"id":"msg_002","timestamp":"2026-03-15T10:01:00Z","payload":{"action":"dispatch","window":{"start":"2026-03-15T12:00:00Z","end":"2026-03-15T12:30:00Z"}},"data":{"task":{"kind":"handoff","priority":"medium"}}}}
+{"source_protocol":"A2A","target_protocol":"MCP","payload":{"id":"msg_003","timestamp":"2026-03-15T10:02:00Z","payload":{"action":"summarize","content":"Summarize the attached report."},"data":{"task":{"kind":"summary","priority":"low"}}}}
