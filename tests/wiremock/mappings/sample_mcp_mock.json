@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/mcp/v1/translate"
+  },
+  "response": {
+    "status": 200,
+    "body": "{\"status\": \"success\", \"translated_payload\": {\"intent\": \"mocked_response\"}}",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     HTTPS_ONLY: bool = False
     LOG_LEVEL: str = "INFO"
+    SENTRY_DSN: Optional[str] = None
     
     # Postgres
     POSTGRES_SERVER: str = "db"
