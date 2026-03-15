@@ -9,7 +9,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://admin:password@db-staging:5432/translator_db_staging
       - REDIS_HOST=redis-staging
       - MCP_SERVER_URL=http://wiremock:8080
-      - SENTRY_DSN=http://sentry-mock:9000
+      - SENTRY_DSN=
+      - AUTH_JWT_SECRET=local-test-secret
+      - AUTH_ISSUER=https://auth.example.com/
+      - AUTH_AUDIENCE=translator-middleware
     depends_on:
       - db-staging
       - redis-staging

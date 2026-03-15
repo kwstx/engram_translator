@@ -152,3 +152,8 @@ cython_debug/
 .vscode/
 *.swp
 *.swo
+
+# Node/Cypress
+node_modules/
+cypress/screenshots/
+cypress/videos/

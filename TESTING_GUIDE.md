@@ -110,3 +110,34 @@ The `run_integration_e2e.py` script includes a comparison engine that:
 1. Translates a message from Source Protocol to Target Protocol.
 2. Compares the result against a "Gold Standard" expected payload.
 3. Outputs a unified diff if translations drift from the expected fidelity.
+
+## 10. Cypress E2E (API Smoke)
+We use Cypress for E2E smoke coverage, focused on API flows when a UI is not present.
+
+### Install (one-time)
+```powershell
+npm install
+```
+
+### Run in headless mode
+```powershell
+npm run cypress:run
+```
+
+### Open the interactive runner
+```powershell
+npm run cypress:open
+```
+
+### Environment overrides
+```powershell
+$env:CYPRESS_BASE_URL="http://localhost:8001"
+$env:CYPRESS_AUTH_JWT_SECRET="local-test-secret"
+$env:CYPRESS_AUTH_ISSUER="https://auth.example.com/"
+$env:CYPRESS_AUTH_AUDIENCE="translator-middleware"
+```
+
+Tests live in `cypress/e2e/` and currently validate:
+- `/metrics` is reachable
+- A2A → MCP success via `POST /api/v1/beta/translate`
+- A2A → ACP returns `422` when no route exists
