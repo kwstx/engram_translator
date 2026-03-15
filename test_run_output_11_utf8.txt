@@ -1,0 +1,449 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\galan\translator_middleware
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-1.3.0, cov-7.0.0, mock-3.15.1, respx-0.22.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 72 items
+
+tests\test_api_endpoints.py ..F...F.                                     [ 11%]
+tests\test_core_security.py ........                                     [ 22%]
+tests\test_environment.py ..                                             [ 25%]
+tests\test_semantic_ml_mapper.py .....                                   [ 31%]
+tests\test_semantic_ontology_manager.py ....                             [ 37%]
+tests\test_services_discovery.py .....                                   [ 44%]
+tests\test_services_mapping_failures.py .....                            [ 51%]
+tests\test_services_queue.py ...                                         [ 55%]
+tests\test_services_task_worker.py ....                                  [ 61%]
+tests\test_smoke.py .                                                    [ 62%]
+app\core\test_translator.py ........                                     [ 73%]
+app\semantic\test_data_silo_resolver.py .                                [ 75%]
+app\messaging\test_handoff.py ..................                         [100%]
+
+================================== FAILURES ===================================
+____________________________ test_discover_agents _____________________________
+
+client = <starlette.testclient.TestClient object at 0x0000027335CB84A0>
+
+    @pytest.mark.asyncio
+    async def test_discover_agents(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [
+            AgentRegistry(name="A1", supported_protocols=["A2A"])
+        ]
+        mock_session.execute.return_value = mock_result
+    
+        # Mocking the contains operator which is PG-specific
+        with patch("app.api.v1.endpoints.AgentRegistry.supported_protocols") as mock_protocols:
+            mock_protocols.contains.return_value = MagicMock()
+>           response = client.get("/api/v1/discover?protocol=A2A")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_api_endpoints.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+venv\Lib\site-packages\starlette\testclient.py:473: in get
+    return super().get(
+venv\Lib\site-packages\httpx\_client.py:1053: in get
+    return self.request(
+venv\Lib\site-packages\starlette\testclient.py:445: in request
+    return super().request(
+venv\Lib\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+venv\Lib\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+venv\Lib\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\testclient.py:348: in handle_request
+    raise exc
+venv\Lib\site-packages\starlette\testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+venv\Lib\site-packages\anyio\from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+venv\Lib\site-packages\anyio\from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\applications.py:1160: in __call__
+    await super().__call__(scope, receive, send)
+venv\Lib\site-packages\starlette\applications.py:107: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+venv\Lib\site-packages\prometheus_fastapi_instrumentator\middleware.py:177: in __call__
+    raise exc
+venv\Lib\site-packages\prometheus_fastapi_instrumentator\middleware.py:175: in __call__
+    await self.app(scope, receive, send_wrapper)
+venv\Lib\site-packages\starlette\middleware\base.py:191: in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\contextlib.py:155: in __exit__
+    self.gen.throw(value)
+venv\Lib\site-packages\starlette\_utils.py:87: in collapse_excgroups
+    raise exc
+venv\Lib\site-packages\starlette\middleware\base.py:193: in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\slowapi\middleware.py:136: in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\middleware\base.py:168: in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+venv\Lib\site-packages\starlette\middleware\base.py:144: in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:716: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:736: in app
+    await route.handle(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:290: in handle
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:130: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\routing.py:116: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\routing.py:670: in app
+    raw_response = await run_endpoint_function(
+venv\Lib\site-packages\fastapi\routing.py:324: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\v1\endpoints.py:57: in discover_agents
+    statement = statement.where(AgentRegistry.supported_protocols.contains([protocol]))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\sqlmodel\sql\_expression_select_cls.py:23: in where
+    return super().where(*whereclause)  # type: ignore[arg-type]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<string>:2: in where
+    ???
+venv\Lib\site-packages\sqlalchemy\sql\base.py:285: in _generative
+    x = fn(self, *args, **kw)
+        ^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\sqlalchemy\sql\selectable.py:6252: in where
+    where_criteria: ColumnElement[Any] = coercions.expect(
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:396: in expect
+    resolved = impl._literal_coercion(
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:635: in _literal_coercion
+    self._raise_for_expected(element, argname)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.sql.coercions.WhereHavingImpl object at 0x0000027310AACDC0>
+element = <MagicMock name='supported_protocols.contains()' id='2693847167728'>
+argname = None, resolved = None, advice = None, code = None, err = None, kw = {}
+got = "<MagicMock name='supported_protocols.contains()' id='2693847167728'>"
+msg = "SQL expression for WHERE/HAVING role expected, got <MagicMock name='supported_protocols.contains()' id='2693847167728'>."
+
+    def _raise_for_expected(
+        self,
+        element: Any,
+        argname: Optional[str] = None,
+        resolved: Optional[Any] = None,
+        *,
+        advice: Optional[str] = None,
+        code: Optional[str] = None,
+        err: Optional[Exception] = None,
+        **kw: Any,
+    ) -> NoReturn:
+        if resolved is not None and resolved is not element:
+            got = "%r object resolved from %r object" % (resolved, element)
+        else:
+            got = repr(element)
+    
+        if argname:
+            msg = "%s expected for argument %r; got %s." % (
+                self.name,
+                argname,
+                got,
+            )
+        else:
+            msg = "%s expected, got %s." % (self.name, got)
+    
+        if advice:
+            msg += " " + advice
+    
+>       raise exc.ArgumentError(msg, code=code) from err
+E       sqlalchemy.exc.ArgumentError: SQL expression for WHERE/HAVING role expected, got <MagicMock name='supported_protocols.contains()' id='2693847167728'>.
+
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:519: ArgumentError
+__________________________ test_discover_agents_post __________________________
+
+client = <starlette.testclient.TestClient object at 0x0000027335D31520>
+
+    @pytest.mark.asyncio
+    async def test_discover_agents_post(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        # Mock mapping results or empty
+        mock_mapping_result = MagicMock()
+        mock_mapping_result.scalars.return_value.all.return_value = []
+    
+        # Mock agent registry results
+        mock_agent_result = MagicMock()
+        mock_agent_result.scalars.return_value.all.return_value = [
+            AgentRegistry(name="A1", supported_protocols=["A2A"], semantic_tags=["tag1"])
+        ]
+    
+        mock_session.execute.side_effect = [mock_mapping_result, mock_agent_result]
+    
+        discovery_request = {
+            "protocols": ["A2A"],
+            "semantic_tags": ["tag1"]
+        }
+    
+        with patch("app.api.v1.discovery.AgentRegistry.supported_protocols") as mock_proto, \
+             patch("app.api.v1.discovery.AgentRegistry.semantic_tags") as mock_tags:
+            mock_proto.overlap.return_value = MagicMock()
+            mock_tags.overlap.return_value = MagicMock()
+    
+>           response = client.post("/api/v1/discovery/", json=discovery_request)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_api_endpoints.py:140: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+venv\Lib\site-packages\starlette\testclient.py:546: in post
+    return super().post(
+venv\Lib\site-packages\httpx\_client.py:1144: in post
+    return self.request(
+venv\Lib\site-packages\starlette\testclient.py:445: in request
+    return super().request(
+venv\Lib\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+venv\Lib\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+venv\Lib\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\testclient.py:348: in handle_request
+    raise exc
+venv\Lib\site-packages\starlette\testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+venv\Lib\site-packages\anyio\from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+venv\Lib\site-packages\anyio\from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\applications.py:1160: in __call__
+    await super().__call__(scope, receive, send)
+venv\Lib\site-packages\starlette\applications.py:107: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+venv\Lib\site-packages\prometheus_fastapi_instrumentator\middleware.py:177: in __call__
+    raise exc
+venv\Lib\site-packages\prometheus_fastapi_instrumentator\middleware.py:175: in __call__
+    await self.app(scope, receive, send_wrapper)
+venv\Lib\site-packages\starlette\middleware\base.py:191: in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+..\.pyenv\pyenv-win\versions\3.12.0\Lib\contextlib.py:155: in __exit__
+    self.gen.throw(value)
+venv\Lib\site-packages\starlette\_utils.py:87: in collapse_excgroups
+    raise exc
+venv\Lib\site-packages\starlette\middleware\base.py:193: in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\slowapi\middleware.py:136: in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\starlette\middleware\base.py:168: in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+venv\Lib\site-packages\starlette\middleware\base.py:144: in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:716: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:736: in app
+    await route.handle(scope, receive, send)
+venv\Lib\site-packages\starlette\routing.py:290: in handle
+    await self.app(scope, receive, send)
+venv\Lib\site-packages\fastapi\routing.py:130: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv\Lib\site-packages\fastapi\routing.py:116: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\fastapi\routing.py:670: in app
+    raw_response = await run_endpoint_function(
+venv\Lib\site-packages\fastapi\routing.py:324: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\v1\discovery.py:65: in discover_agents
+    stmt = select(AgentRegistry).where(
+venv\Lib\site-packages\sqlmodel\sql\_expression_select_cls.py:23: in where
+    return super().where(*whereclause)  # type: ignore[arg-type]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<string>:2: in where
+    ???
+venv\Lib\site-packages\sqlalchemy\sql\base.py:285: in _generative
+    x = fn(self, *args, **kw)
+        ^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\sqlalchemy\sql\selectable.py:6252: in where
+    where_criteria: ColumnElement[Any] = coercions.expect(
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:396: in expect
+    resolved = impl._literal_coercion(
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:635: in _literal_coercion
+    self._raise_for_expected(element, argname)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.sql.coercions.WhereHavingImpl object at 0x0000027310AACDC0>
+element = <MagicMock name='supported_protocols.overlap()' id='2693852209488'>
+argname = None, resolved = None, advice = None, code = None, err = None, kw = {}
+got = "<MagicMock name='supported_protocols.overlap()' id='2693852209488'>"
+msg = "SQL expression for WHERE/HAVING role expected, got <MagicMock name='supported_protocols.overlap()' id='2693852209488'>."
+
+    def _raise_for_expected(
+        self,
+        element: Any,
+        argname: Optional[str] = None,
+        resolved: Optional[Any] = None,
+        *,
+        advice: Optional[str] = None,
+        code: Optional[str] = None,
+        err: Optional[Exception] = None,
+        **kw: Any,
+    ) -> NoReturn:
+        if resolved is not None and resolved is not element:
+            got = "%r object resolved from %r object" % (resolved, element)
+        else:
+            got = repr(element)
+    
+        if argname:
+            msg = "%s expected for argument %r; got %s." % (
+                self.name,
+                argname,
+                got,
+            )
+        else:
+            msg = "%s expected, got %s." % (self.name, got)
+    
+        if advice:
+            msg += " " + advice
+    
+>       raise exc.ArgumentError(msg, code=code) from err
+E       sqlalchemy.exc.ArgumentError: SQL expression for WHERE/HAVING role expected, got <MagicMock name='supported_protocols.overlap()' id='2693852209488'>.
+
+venv\Lib\site-packages\sqlalchemy\sql\coercions.py:519: ArgumentError
+============================== warnings summary ===============================
+tests/test_api_endpoints.py::test_register_agent
+  C:\Users\galan\translator_middleware\app\api\v1\endpoints.py:41: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    db.add(agent)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_api_endpoints.py::test_register_agent
+  C:\Users\galan\translator_middleware\venv\Lib\site-packages\pydantic\type_adapter.py:672: UserWarning: Pydantic serializer warnings:
+    PydanticSerializationUnexpectedValue(Expected `uuid` - serialized value may not be as expected [field_name='agent_id', input_value='7445b02b-02fc-4e9a-b19e-54b36c161dea', input_type=str])
+    return self.serializer.to_json(
+
+tests/test_api_endpoints.py::test_enqueue_task
+  C:\Users\galan\translator_middleware\app\api\v1\endpoints.py:321: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    db.add(task)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_services_mapping_failures.py::test_apply_ml_suggestion_low_confidence
+  C:\Users\galan\.pyenv\pyenv-win\versions\3.12.0\Lib\unittest\mock.py:2185: RuntimeWarning: coroutine 'DiscoveryService._ping_agents_loop' was never awaited
+    def __init__(self, name, parent):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_services_task_worker.py::TestTaskWorker::test_process_task_success
+  C:\Users\galan\translator_middleware\app\services\task_worker.py:90: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    session.add(message)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_services_task_worker.py::TestTaskWorker::test_process_task_failure_dead_letter
+  C:\Users\galan\translator_middleware\app\services\task_worker.py:111: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    session.add(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.12.0-final-0 _______________
+
+Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+app\__init__.py                               0      0   100%
+app\api\v1\__init__.py                        0      0   100%
+app\api\v1\discovery.py                      43      5    88%
+app\api\v1\endpoints.py                     132     43    67%
+app\core\config.py                           81     19    77%
+app\core\exceptions.py                        8      0   100%
+app\core\logging.py                          16      0   100%
+app\core\metrics.py                          35      2    94%
+app\core\redis_client.py                     15      4    73%
+app\core\security.py                         35      2    94%
+app\core\test_translator.py                  53      1    98%
+app\core\translator.py                      204     43    79%
+app\db\models.py                            101      0   100%
+app\db\session.py                            50     22    56%
+app\main.py                                  42      8    81%
+app\messaging\__init__.py                     2      0   100%
+app\messaging\orchestrator.py                86      3    97%
+app\messaging\test_handoff.py               159      3    98%
+app\semantic\mapper.py                      130     47    64%
+app\semantic\ml_mapper.py                    75     13    83%
+app\semantic\ontology_manager.py             27      1    96%
+app\semantic\test_data_silo_resolver.py      26      3    88%
+app\services\discovery.py                   103     13    87%
+app\services\mapping_failures.py             62      8    87%
+app\services\queue.py                        39      1    97%
+app\services\task_worker.py                  76     17    78%
+-------------------------------------------------------------
+TOTAL                                      1600    258    84%
+=========================== short test summary info ===========================
+FAILED tests/test_api_endpoints.py::test_discover_agents - sqlalchemy.exc.Arg...
+FAILED tests/test_api_endpoints.py::test_discover_agents_post - sqlalchemy.ex...
+================== 2 failed, 70 passed, 6 warnings in 19.40s ==================

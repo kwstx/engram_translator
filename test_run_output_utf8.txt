@@ -1,0 +1,89 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\galan\translator_middleware
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-1.3.0, cov-7.0.0, mock-3.15.1, respx-0.22.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 30 items
+
+tests\test_environment.py ..                                             [  6%]
+tests\test_smoke.py .                                                    [ 10%]
+app\core\test_translator.py ........                                     [ 36%]
+app\semantic\test_data_silo_resolver.py F                                [ 40%]
+app\messaging\test_handoff.py ..................                         [100%]
+
+================================== FAILURES ===================================
+________________________________ test_resolver ________________________________
+
+    def test_resolver():
+        logging.basicConfig(level=logging.INFO)
+    
+        # Paths (using absolute for safety)
+        ontology_path = os.path.abspath("app/semantic/protocols.owl")
+    
+>       mapper = SemanticMapper(ontology_path)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\semantic\test_data_silo_resolver.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\semantic\mapper.py:21: in __init__
+    self.redis = get_redis_client()
+                 ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    @lru_cache
+    def get_redis_client() -> Redis | None:
+        if not settings.REDIS_URL:
+            return None
+    
+        if redis_lib is None:
+            return None
+    
+>       return redis_lib.Redis.from_url(
+               ^^^^^^^^^^^^^^^
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=settings.REDIS_SOCKET_TIMEOUT_SECONDS,
+            health_check_interval=30,
+            retry_on_timeout=True,
+        )
+E       AttributeError: module 'redis' has no attribute 'Redis'
+
+app\core\redis.py:24: AttributeError
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.12.0-final-0 _______________
+
+Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+app\__init__.py                               0      0   100%
+app\api\v1\__init__.py                        0      0   100%
+app\api\v1\discovery.py                      43     19    56%
+app\api\v1\endpoints.py                     132     62    53%
+app\core\config.py                           81     19    77%
+app\core\exceptions.py                        8      0   100%
+app\core\logging.py                          16      0   100%
+app\core\metrics.py                          35      2    94%
+app\core\redis.py                            15      4    73%
+app\core\security.py                         35     24    31%
+app\core\test_translator.py                  53      1    98%
+app\core\translator.py                      204     43    79%
+app\db\models.py                            101      0   100%
+app\db\session.py                            50     25    50%
+app\main.py                                  42      8    81%
+app\messaging\__init__.py                     2      0   100%
+app\messaging\orchestrator.py                86      3    97%
+app\messaging\test_handoff.py               159      3    98%
+app\semantic\mapper.py                      130    108    17%
+app\semantic\ml_mapper.py                    75     47    37%
+app\semantic\ontology_manager.py             27     14    48%
+app\semantic\test_data_silo_resolver.py      26     16    38%
+app\services\discovery.py                   103     77    25%
+app\services\mapping_failures.py             62     52    16%
+app\services\queue.py                        39     32    18%
+app\services\task_worker.py                  76     52    32%
+-------------------------------------------------------------
+TOTAL                                      1600    611    62%
+=========================== short test summary info ===========================
+FAILED app/semantic/test_data_silo_resolver.py::test_resolver - AttributeErro...
+======================== 1 failed, 29 passed in 7.32s =========================

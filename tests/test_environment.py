@@ -17,9 +17,9 @@ async def test_translate_endpoint_mock():
     # This is a smoke test for the router
     from httpx import ASGITransport
     payload = {
-        "source_message": {"intent": "greet"},
-        "source_protocol": "mcp",
-        "target_protocol": "a2a"
+        "source_agent": "agent-a",
+        "target_agent": "agent-b",
+        "payload": {"intent": "greet"}
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

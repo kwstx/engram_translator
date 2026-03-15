@@ -4,7 +4,7 @@ import structlog
 import jsonschema
 from pyDatalog import pyDatalog
 from app.core.config import settings
-from app.core.redis import get_redis_client
+from app.core.redis_client import get_redis_client
 pyDatalog.create_terms('X, Y, map_field')
 
 logger = structlog.get_logger(__name__)

@@ -1,0 +1,274 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\galan\translator_middleware
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-1.3.0, cov-7.0.0, mock-3.15.1, respx-0.22.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 72 items
+
+tests\test_api_endpoints.py .FFFFFFF                                     [ 11%]
+tests\test_core_security.py ........                                     [ 22%]
+tests\test_environment.py ..                                             [ 25%]
+tests\test_semantic_ml_mapper.py .....                                   [ 31%]
+tests\test_semantic_ontology_manager.py ....                             [ 37%]
+tests\test_services_discovery.py .....                                   [ 44%]
+tests\test_services_mapping_failures.py .....                            [ 51%]
+tests\test_services_queue.py ...                                         [ 55%]
+tests\test_services_task_worker.py ....                                  [ 61%]
+tests\test_smoke.py .                                                    [ 62%]
+app\core\test_translator.py ........                                     [ 73%]
+app\semantic\test_data_silo_resolver.py .                                [ 75%]
+app\messaging\test_handoff.py ..................                         [100%]
+
+================================== FAILURES ===================================
+_____________________________ test_register_agent _____________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF216A20>
+
+    @pytest.mark.asyncio
+    async def test_register_agent(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        agent_data = {
+            "agent_id": str(uuid4()),
+            "name": "Test Agent",
+            "endpoint_url": "http://test",
+            "supported_protocols": ["A2A"]
+        }
+    
+        # TestClient for sync calls, but the endpoint is async.
+        # FastAPI handles this internally by running async endpoints in a loop.
+        response = client.post("/api/v1/register", json=agent_data)
+    
+>       assert response.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:46: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: POST http://testserver/api/v1/register \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.581713Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/register "HTTP/1.1 401 Unauthorized"
+____________________________ test_discover_agents _____________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF25F920>
+
+    @pytest.mark.asyncio
+    async def test_discover_agents(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [
+            AgentRegistry(name="A1", supported_protocols=["A2A"])
+        ]
+        mock_session.execute.return_value = mock_result
+    
+        response = client.get("/api/v1/discover?protocol=A2A")
+>       assert response.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:63: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: GET http://testserver/api/v1/discover?protocol=A2A \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.612634Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/discover?protocol=A2A "HTTP/1.1 401 Unauthorized"
+______________________________ test_enqueue_task ______________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF2FA5A0>
+
+    @pytest.mark.asyncio
+    async def test_enqueue_task(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        task_request = {
+            "source_message": {"hello": "world"},
+            "source_protocol": "A2A",
+            "target_protocol": "MCP",
+            "target_agent_id": str(uuid4())
+        }
+    
+        response = client.post("/api/v1/queue/enqueue", json=task_request)
+>       assert response.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:80: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: POST http://testserver/api/v1/queue/enqueue \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.651541Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/queue/enqueue "HTTP/1.1 401 Unauthorized"
+________________________ test_poll_agent_messages_none ________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF30BEF0>
+
+    @pytest.mark.asyncio
+    async def test_poll_agent_messages_none(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        with patch("app.api.v1.endpoints.lease_agent_message", new_callable=AsyncMock) as mock_lease:
+            mock_lease.return_value = None
+            agent_id = uuid4()
+            response = client.post(f"/api/v1/agents/{agent_id}/messages/poll")
+>           assert response.status_code == 204
+E           assert 401 == 204
+E            +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:94: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: POST http://testserver/api/v1/agents/076292a1-6dc4-4536-9080-f97793e61702/messages/poll \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.682018Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/agents/076292a1-6dc4-4536-9080-f97793e61702/messages/poll "HTTP/1.1 401 Unauthorized"
+____________________ test_translate_unauthenticated_logic _____________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF307CE0>
+
+    @pytest.mark.asyncio
+    async def test_translate_unauthenticated_logic(client):
+        # translate_message is basically a placeholder in current code
+        # But it uses require_scopes(["translate:a2a"])
+        request_data = {
+            "source_agent": "A",
+            "target_agent": "B",
+            "payload": {"data": 1}
+        }
+        response = client.post("/api/v1/translate", json=request_data)
+>       assert response.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:107: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: POST http://testserver/api/v1/translate \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.702179Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/translate "HTTP/1.1 401 Unauthorized"
+__________________________ test_discover_agents_post __________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF3066C0>
+
+    @pytest.mark.asyncio
+    async def test_discover_agents_post(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        # Mock mapping results or empty
+        mock_mapping_result = MagicMock()
+        mock_mapping_result.scalars.return_value.all.return_value = []
+    
+        # Mock agent registry results
+        mock_agent_result = MagicMock()
+        mock_agent_result.scalars.return_value.all.return_value = [
+            AgentRegistry(name="A1", supported_protocols=["A2A"], semantic_tags=["tag1"])
+        ]
+    
+        mock_session.execute.side_effect = [mock_mapping_result, mock_agent_result]
+    
+        discovery_request = {
+            "protocols": ["A2A"],
+            "semantic_tags": ["tag1"]
+        }
+    
+        response = client.post("/api/v1/discovery/", json=discovery_request)
+>       assert response.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:133: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: POST http://testserver/api/v1/discovery/ \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.729628Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/discovery/ "HTTP/1.1 401 Unauthorized"
+_________________________ test_get_collaborators_api __________________________
+
+client = <starlette.testclient.TestClient object at 0x000001B1DF35A510>
+
+    @pytest.mark.asyncio
+    async def test_get_collaborators_api(client):
+        mock_session = AsyncMock()
+        app.dependency_overrides[get_session] = lambda: mock_session
+    
+        with patch("app.services.discovery.DiscoveryService.find_collaborators", new_callable=AsyncMock) as mock_find:
+            agent = AgentRegistry(agent_id=str(uuid4()), endpoint_url="http://test", supported_protocols=["A2A"], is_active=True)
+            mock_find.return_value = [{
+                "agent": agent,
+                "compatibility_score": 0.8,
+                "shared_protocols": ["A2A"],
+                "mappable_protocols": []
+            }]
+    
+            response = client.get("/api/v1/discovery/collaborators?protocols=A2A")
+>           assert response.status_code == 200
+E           assert 401 == 200
+E            +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_endpoints.py:152: AssertionError
+---------------------------- Captured stderr call -----------------------------
+{"event": "HTTP Request: GET http://testserver/api/v1/discovery/collaborators?protocols=A2A \"HTTP/1.1 401 Unauthorized\"", "logger": "httpx", "level": "info", "timestamp": "2026-03-15T17:06:37.748678Z"}
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/discovery/collaborators?protocols=A2A "HTTP/1.1 401 Unauthorized"
+============================== warnings summary ===============================
+tests/test_services_mapping_failures.py::test_log_mapping_failure
+  C:\Users\galan\.pyenv\pyenv-win\versions\3.12.0\Lib\unittest\mock.py:508: RuntimeWarning: coroutine 'DiscoveryService._ping_agents_loop' was never awaited
+    def _mock_add_spec(self, spec, spec_set, _spec_as_instance=False,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_services_task_worker.py::TestTaskWorker::test_process_task_success
+  C:\Users\galan\translator_middleware\app\services\task_worker.py:90: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    session.add(message)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_services_task_worker.py::TestTaskWorker::test_process_task_failure_dead_letter
+  C:\Users\galan\translator_middleware\app\services\task_worker.py:111: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    session.add(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.12.0-final-0 _______________
+
+Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+app\__init__.py                               0      0   100%
+app\api\v1\__init__.py                        0      0   100%
+app\api\v1\discovery.py                      43     19    56%
+app\api\v1\endpoints.py                     132     62    53%
+app\core\config.py                           81     19    77%
+app\core\exceptions.py                        8      0   100%
+app\core\logging.py                          16      0   100%
+app\core\metrics.py                          35      2    94%
+app\core\redis_client.py                     15      4    73%
+app\core\security.py                         35      2    94%
+app\core\test_translator.py                  53      1    98%
+app\core\translator.py                      204     43    79%
+app\db\models.py                            101      0   100%
+app\db\session.py                            50     25    50%
+app\main.py                                  42      8    81%
+app\messaging\__init__.py                     2      0   100%
+app\messaging\orchestrator.py                86      3    97%
+app\messaging\test_handoff.py               159      3    98%
+app\semantic\mapper.py                      130     47    64%
+app\semantic\ml_mapper.py                    75     13    83%
+app\semantic\ontology_manager.py             27      1    96%
+app\semantic\test_data_silo_resolver.py      26      3    88%
+app\services\discovery.py                   103     13    87%
+app\services\mapping_failures.py             62      8    87%
+app\services\queue.py                        39      1    97%
+app\services\task_worker.py                  76     17    78%
+-------------------------------------------------------------
+TOTAL                                      1600    294    82%
+=========================== short test summary info ===========================
+FAILED tests/test_api_endpoints.py::test_register_agent - assert 401 == 200
+FAILED tests/test_api_endpoints.py::test_discover_agents - assert 401 == 200
+FAILED tests/test_api_endpoints.py::test_enqueue_task - assert 401 == 200
+FAILED tests/test_api_endpoints.py::test_poll_agent_messages_none - assert 40...
+FAILED tests/test_api_endpoints.py::test_translate_unauthenticated_logic - as...
+FAILED tests/test_api_endpoints.py::test_discover_agents_post - assert 401 ==...
+FAILED tests/test_api_endpoints.py::test_get_collaborators_api - assert 401 =...
+================== 7 failed, 65 passed, 3 warnings in 19.65s ==================
