@@ -54,6 +54,67 @@ pytest --cov=app tests/
 ### Async Testing
 All tests should use `@pytest.mark.asyncio`. Use the `httpx.AsyncClient` for API testing.
 
+### CI/CD Feedback Loop (GitHub Actions)
+We run unit tests (excluding `@pytest.mark.integration`) on every pull request, every push to `main`, and on a nightly schedule at **03:00 UTC**. The workflow saves:
+- `test-results/pytest.xml` (JUnit report)
+- `test-results/pytest.log` (stdout/stderr)
+- `coverage.xml` (coverage report)
+
+When a run fails, open the workflow run and download the artifacts to inspect failures locally. Use the log output to prioritize fixes and add/adjust tests that cover the regression.
+
+## 3.1 API Integration Test Examples
+
+These examples are meant for users exploring API integrations and verifying end-to-end behavior.
+
+### Generate a JWT (local)
+```powershell
+python scripts/generate_token.py --secret $env:AUTH_JWT_SECRET --scope translate:a2a
+$env:JWT_TOKEN = "<paste-output-token-here>"
+```
+
+### Register an agent
+```powershell
+$headers = @{ "Content-Type" = "application/json" }
+$body = @{
+  agent_id = "beta-agent-a"
+  endpoint_url = "http://localhost:8081"
+  supported_protocols = @("a2a")
+  semantic_tags = @("scheduling")
+  is_active = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/v1/register" -Headers $headers -Body $body
+```
+
+### Translate a message (requires JWT)
+```powershell
+$headers = @{
+  "Content-Type" = "application/json"
+  "Authorization" = "Bearer $env:JWT_TOKEN"
+}
+$body = @{
+  source_agent = "beta-agent-b"
+  target_agent = "beta-agent-a"
+  payload = @{ intent = "schedule_meeting" }
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/v1/translate" -Headers $headers -Body $body
+```
+
+### Curl alternative (cross-platform)
+```bash
+JWT_TOKEN="<token>"
+
+curl -X POST "http://localhost:8000/api/v1/register" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"beta-agent-a","endpoint_url":"http://localhost:8081","supported_protocols":["a2a"],"semantic_tags":["scheduling"],"is_active":true}'
+
+curl -X POST "http://localhost:8000/api/v1/translate" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer '"$JWT_TOKEN"'" \
+  -d '{"source_agent":"beta-agent-b","target_agent":"beta-agent-a","payload":{"intent":"schedule_meeting"}}'
+```
+
 ## 4. Manual API Checks (Postman)
 
 A Postman collection is recommended for exploratory testing.
@@ -141,3 +202,23 @@ Tests live in `cypress/e2e/` and currently validate:
 - `/metrics` is reachable
 - A2A → MCP success via `POST /api/v1/beta/translate`
 - A2A → ACP returns `422` when no route exists
+
+## 11. User Acceptance Testing (UAT) with Beta Users
+
+Use a short, consistent beta cycle to gather integration feedback before releases:
+
+1. Create a beta test plan
+   - Target APIs: `POST /api/v1/register`, `GET /api/v1/discovery/collaborators`, `POST /api/v1/translate`
+   - Supported protocols: A2A, MCP, ACP
+   - Success criteria: end-to-end translation with no manual field edits
+2. Provide beta testers with:
+   - Base URL and JWT token
+   - The API examples above
+   - A short checklist of scenarios to run (single hop, multi hop, error handling)
+3. Collect feedback from:
+   - CI artifacts (`pytest.log`, `pytest.xml`)
+   - App logs (translation failures and mapping suggestions)
+   - A shared feedback template (issue, steps, expected, actual, logs)
+4. Iterate on fixes:
+   - Add or update tests for each defect
+   - Re-run CI and confirm artifact logs are clean
