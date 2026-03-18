@@ -254,6 +254,37 @@ async def beta_translate_message(
         ) from exc
 
 
+@router.post(
+    "/beta/playground/translate",
+    response_model=BetaTranslateResponse,
+    tags=["Beta", "Playground"],
+    summary="Playground endpoint (no JWT required)",
+    description="Public sandbox endpoint for the Web Playground to translate messages instantly.",
+)
+async def playground_translate_message(
+    request: BetaTranslateRequest,
+    db: Session = Depends(get_session),
+):
+    try:
+        result = _beta_orchestrator.handoff(
+            request.payload, request.source_protocol, request.target_protocol
+        )
+        return BetaTranslateResponse(
+            status="success",
+            message=(
+                f"Translated message from {request.source_protocol} "
+                f"to {request.target_protocol}"
+            ),
+            payload=result.translated_message,
+            mapping_suggestions=[],
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Playground Translation failed: {str(exc)}",
+        )
+
+
 class TaskEnqueueRequest(BaseModel):
     source_message: Dict[str, Any] = Field(
         ..., description="Message payload to be translated."

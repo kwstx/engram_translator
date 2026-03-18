@@ -22,6 +22,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import endpoints, discovery
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -57,6 +58,14 @@ app = FastAPI(
     description="Bridge for A2A, MCP, and ACP protocols with semantic mapping.",
     version="0.1.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.exception_handler(RequestValidationError)
