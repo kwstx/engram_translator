@@ -66,5 +66,28 @@ export const MiroFishBridge = (baseUrl = 'http://localhost:5001') => {
   };
 };
 
+/**
+ * Step 7: One-line router function to pipe messages and data into a MiroFish Swarm.
+ * 
+ * @param interAgentMessage - Plain string message from another agent
+ * @param externalData - Object containing news headlines, prices, and sentiment scores
+ * @param targetSwarmId - Swarm identifier for parallel simulations
+ * @param numAgents - Number of agents in the swarm (default 1000)
+ * @param mirofishBaseUrl - Base URL of the MiroFish service
+ * @returns The simulation report forwarded back in a seamless callback
+ */
+export const pipeToMiroFishSwarm = async (
+  interAgentMessage: string, 
+  externalData: { latestNewsHeadlines: any[]; currentPrices: any[]; sentimentScores: any[] }, 
+  targetSwarmId: string, 
+  numAgents = 1000, 
+  mirofishBaseUrl: string
+) => (await axios.post(`${mirofishBaseUrl}/api/simulation/start`, {
+    seedText: interAgentMessage + JSON.stringify(externalData),
+    numAgents,
+    swarmId: targetSwarmId,
+    godsEyeVariables: externalData
+  })).data;
+
 // Export as default for one-line imports
 export default MiroFishBridge;
