@@ -157,5 +157,78 @@ export const pipeToMiroFishSwarm = async (
   return response.data;
 };
 
+/**
+ * -----------------------------------------------------------------
+ * Step 9: One-line router integration for OpenClaw / Clawdbot users.
+ *
+ * Usage:
+ *   import { engram } from './mirofish-bridge';
+ *   engram.routeTo('mirofish', {
+ *     swarmId: 'my-swarm',
+ *     mirofishBaseUrl: 'http://localhost:5001',
+ *   });
+ *
+ * PREREQUISITE: users must first launch their own MiroFish instance
+ * with a valid LLM_API_KEY configured in its .env file.
+ * -----------------------------------------------------------------
+ */
+
+export interface MiroFishRouteConfig {
+  swarmId?: string;
+  mirofishBaseUrl?: string;
+  numAgents?: number;
+}
+
+export const engram = {
+  /**
+   * Route an inter-agent message to the specified target platform.
+   *
+   * When `target === 'mirofish'`, the message is normalised through the
+   * existing translation layer and forwarded to the user's MiroFish
+   * instance via `pipeToMiroFishSwarm`.
+   *
+   * @param target    Target platform identifier (e.g. 'mirofish').
+   * @param config    Platform-specific configuration.
+   * @param message   Optional inter-agent message to send immediately.
+   * @returns         The simulation report (or other platform response).
+   */
+  routeTo: async (
+    target: string,
+    config: MiroFishRouteConfig = {},
+    message?: string,
+  ) => {
+    if (target.toLowerCase() === 'mirofish') {
+      const {
+        swarmId = 'default',
+        mirofishBaseUrl = 'http://localhost:5001',
+        numAgents = 1000,
+      } = config;
+
+      if (message) {
+        return pipeToMiroFishSwarm(
+          message,
+          swarmId,
+          numAgents,
+          mirofishBaseUrl,
+        );
+      }
+
+      // Return a pre-configured sender function for deferred use
+      return (deferredMessage: string) =>
+        pipeToMiroFishSwarm(
+          deferredMessage,
+          swarmId,
+          numAgents,
+          mirofishBaseUrl,
+        );
+    }
+
+    throw new Error(
+      `[Engram] Unsupported routing target: "${target}". ` +
+      `Currently supported targets: mirofish`,
+    );
+  },
+};
+
 // Export as default for one-line imports
 export default MiroFishBridge;

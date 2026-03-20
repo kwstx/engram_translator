@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     AGENT_MESSAGE_LEASE_SECONDS: int = 60
     AGENT_MESSAGE_MAX_ATTEMPTS: int = 5
 
+    # MiroFish Bridge
+    MIROFISH_BASE_URL: str = "http://localhost:5001"
+    MIROFISH_DEFAULT_NUM_AGENTS: int = 1000
+    MIROFISH_DEFAULT_SWARM_ID: str = "default"
+
     # Auth
     AUTH_ISSUER: str = "https://auth.example.com/"
     AUTH_AUDIENCE: str = "translator-middleware"
