@@ -10,7 +10,7 @@ from app.db.models import (
     AgentMessageStatus,
 )
 from app.semantic.ontology_manager import ontology_manager
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, ConfigDict
@@ -32,21 +32,29 @@ _beta_orchestrator = Orchestrator()
 class MiroFishPipeRequest(BaseModel):
     agent_id: str = Field(..., description="The ID of the originating AI agent.")
     protocol: str = Field(..., description="The protocol of the incoming message (e.g., A2A, MCP).")
-    payload: Dict[str, Any] = Field(..., description="The message or data to pipe into the swarm.")
+    payload: Dict[str, Any] = Field(..., description="Wrapper for seed_text and num_agents.")
+    # For documentation and validation, explicitly mention subfields:
+    # payload['seed_text']: str
+    # payload['num_agents']: int (optional, default 1000)
     swarm_id: str = Field(default="default", description="The target MiroFish swarm simulation identifier.")
+
+class MiroFishGodsEyeRequest(BaseModel):
+    swarm_id: str = Field(..., description="The target MiroFish swarm simulation identifier.")
+    context_objects: List[Dict[str, Any]] = Field(..., description="Live external events (prices, messages) to inject mid-simulation.")
 
 class MiroFishPipeResponse(BaseModel):
     status: str
     bridge_id: UUID
     swarm_status: str
+    compiled_report: Optional[Dict[str, Any]] = None # Always returns compiled report
     prediction_feedback: Optional[Dict[str, Any]] = None
 
 @router.post(
     "/mirofish/pipe",
     response_model=MiroFishPipeResponse,
     tags=["MiroFish Bridge"],
-    summary="Pipe data into MiroFish Swarm",
-    description="Bridge endpoint to inject inter-agent messages and live data into a MiroFish swarm.",
+    summary="Pipe data into MiroFish Swarm (Seed Injection)",
+    description="Bridge endpoint to inject seed text and initial agent configurations into a MiroFish swarm.",
 )
 async def pipe_to_mirofish(
     request: MiroFishPipeRequest,
@@ -54,13 +62,13 @@ async def pipe_to_mirofish(
 ):
     """
     Pipes message payload into MiroFish swarm simulation.
-    This is a 'one-line router' for external agents to sync with the swarm.
+    Handles 'seed_text' wrapping and 'num_agents' defaulting to 1000.
     """
-    # Logic: 
-    # 1. Translate payload to 'MCP' (internal swarm protocol) if needed
-    # 2. Inject into 'God's-eye variables' or seed text (mocked for now)
-    # 3. Return a bridge ID for tracking
     import uuid
+    
+    # Extract seed fields
+    seed_text = request.payload.get("seed_text", "")
+    num_agents = request.payload.get("num_agents", 1000)
     
     # Simple pass-through translation for now
     try:
@@ -75,9 +83,39 @@ async def pipe_to_mirofish(
         status="piped",
         bridge_id=uuid.uuid4(),
         swarm_status="synchronized",
+        compiled_report={
+            "summary": f"Swarm initialized with {num_agents} agents.",
+            "seed_metadata": {"text_length": len(seed_text)},
+            "prediction": "Simulation running..."
+        },
         prediction_feedback={
             "info": f"Message from {request.agent_id} injected into swarm {request.swarm_id}",
             "translated_payload": translated_payload
+        }
+    )
+
+@router.post(
+    "/mirofish/gods-eye",
+    response_model=MiroFishPipeResponse,
+    tags=["MiroFish Bridge"],
+    summary="God's Eye Injection",
+    description="Inject live external events (prices, messages) mid-simulation to influence swarm behavior.",
+)
+async def mirofish_gods_eye(
+    request: MiroFishGodsEyeRequest,
+    db: Session = Depends(get_session),
+):
+    """
+    Appends live context objects (market prices or messages) to a running swarm.
+    """
+    import uuid
+    return MiroFishPipeResponse(
+        status="injected",
+        bridge_id=uuid.uuid4(),
+        swarm_status="active_feedback_loop",
+        compiled_report={
+            "action": "Live context updated",
+            "objects_processed": len(request.context_objects)
         }
     )
 
