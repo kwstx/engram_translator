@@ -1,0 +1,27 @@
+[
+  {
+    "scenario": "1 Sequential Routing",
+    "status": "SUCCESS",
+    "details": "All platforms hit"
+  },
+  {
+    "scenario": "2 Invalid Keys",
+    "status": "SUCCESS",
+    "message": "Caught 401"
+  },
+  {
+    "scenario": "3 Rate Limit",
+    "status": "SUCCESS",
+    "message": "Caught 429"
+  },
+  {
+    "scenario": "4 Malformed Payload",
+    "status": "SUCCESS",
+    "message": "Caught Validation Error"
+  },
+  {
+    "scenario": "5 High Volume",
+    "status": "SUCCESS",
+    "count": 10
+  }
+]
