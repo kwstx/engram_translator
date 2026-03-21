@@ -21,8 +21,8 @@ AI agents today are often isolated because they speak different protocols (MCP, 
 
 ```mermaid
 flowchart LR
-    A[Source Agent\nProtocol: MCP] -->|Task Request| B(Translator\nMiddleware)
-    B -->|Protocol & Semantic Translation| C[Target Agent\nProtocol: A2A]
+    A["Source Agent<br/>Protocol: MCP"] -->|Task Request| B("Translator<br/>Middleware")
+    B -->|Protocol & Semantic Translation| C["Target Agent<br/>Protocol: A2A"]
 ```
 
 ---
