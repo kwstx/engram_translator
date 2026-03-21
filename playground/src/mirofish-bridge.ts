@@ -181,51 +181,90 @@ export interface MiroFishRouteConfig {
 
 export const engram = {
   /**
+   * Step 10: Multi-Platform Trading Semantic Templates Integration.
+   * Enables one-line activation for Binance, Coinbase, Robinhood, Kalshi, Stripe, PayPal, and Feeds.
+   */
+  _tradingConfigs: {} as Record<string, any>,
+
+  enableTradingTemplate: (platform: string, config: any) => {
+    engram._tradingConfigs[platform.toLowerCase()] = config;
+    console.log(`[Engram] Trading template enabled for: ${platform}`);
+  },
+
+  /**
    * Route an inter-agent message to the specified target platform.
    *
    * When `target === 'mirofish'`, the message is normalised through the
    * existing translation layer and forwarded to the user's MiroFish
    * instance via `pipeToMiroFishSwarm`.
    *
-   * @param target    Target platform identifier (e.g. 'mirofish').
-   * @param config    Platform-specific configuration.
-   * @param message   Optional inter-agent message to send immediately.
-   * @returns         The simulation report (or other platform response).
+   * Supported trading platforms: binance, coinbase, robinhood, kalshi, stripe, paypal, feeds.
+   *
+   * @param target    Target platform identifier (e.g. 'mirofish', 'binance').
+   * @param payload   Inter-agent message or structured order payload.
+   * @param options   Optional override configuration.
+   * @returns         The platform response or simulation report.
    */
   routeTo: async (
     target: string,
-    config: MiroFishRouteConfig = {},
-    message?: string,
+    payload: any,
+    options: any = {},
   ) => {
-    if (target.toLowerCase() === 'mirofish') {
+    const platform = target.toLowerCase();
+    const tradingPlatforms = ['binance', 'coinbase', 'robinhood', 'kalshi', 'stripe', 'paypal', 'feeds'];
+
+    if (platform === 'mirofish') {
       const {
         swarmId = 'default',
         mirofishBaseUrl = 'http://localhost:5001',
         numAgents = 1000,
-      } = config;
+      } = options;
 
-      if (message) {
-        return pipeToMiroFishSwarm(
-          message,
-          swarmId,
-          numAgents,
-          mirofishBaseUrl,
-        );
+      const messageStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      return pipeToMiroFishSwarm(
+        messageStr,
+        swarmId,
+        numAgents,
+        mirofishBaseUrl,
+      );
+    }
+
+    if (tradingPlatforms.includes(platform)) {
+      const userConfig = options.apiKey || options.secret ? options : (engram._tradingConfigs[platform] || {});
+      
+      try {
+        /**
+         * Dynamic adapter loading. 
+         * Note: In a Vite environment, these paths must be resolved at build time or 
+         * configured via glob imports. For this Step 10 implementation, we assume 
+         * the environment supports dynamic resolution of the adapter suite.
+         */
+        // @ts-ignore - Dynamic import of CommonJS adapters in Step 10 context
+        const adapter = await import(`../../trading-templates/adapters/${platform}-adapter.js`);
+        
+        let methodName = `mapAndExecute${platform.charAt(0).toUpperCase() + platform.slice(1)}`;
+        if (platform === 'paypal') methodName = 'mapAndExecutePayPal';
+
+        const result = await adapter[methodName](payload, userConfig);
+        
+        console.log(`[Engram] Successfully executed ${platform} trade via unified schema.`);
+        
+        // Then forward the normalized result back via your translation layer (simulated callback)
+        return {
+          status: 'success',
+          platform,
+          result,
+          timestamp: new Date().toISOString()
+        };
+      } catch (error: any) {
+        console.error(`[Engram] Error routing to ${platform} adapter:`, error);
+        throw new Error(`[Engram] Failed to execute ${platform} adapter: ${error.message}`);
       }
-
-      // Return a pre-configured sender function for deferred use
-      return (deferredMessage: string) =>
-        pipeToMiroFishSwarm(
-          deferredMessage,
-          swarmId,
-          numAgents,
-          mirofishBaseUrl,
-        );
     }
 
     throw new Error(
       `[Engram] Unsupported routing target: "${target}". ` +
-      `Currently supported targets: mirofish`,
+      `Supported targets: mirofish, ${tradingPlatforms.join(', ')}`,
     );
   },
 };

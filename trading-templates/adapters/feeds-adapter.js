@@ -65,9 +65,35 @@ async function getBloombergIndicator(unifiedFeed, userConfig) {
   };
 }
 
+/**
+ * mapAndExecuteFeeds - Feeds Multi-Adapter for Unified Trade Schema.
+ * Dispatches to X, FRED, Reuters, or Bloomberg based on the unifiedFeed.source.
+ * 
+ * @param {Object} unifiedFeed - The unified feed object.
+ * @param {Object} userConfig - Configuration for all supported feeds.
+ * @returns {Promise<Object>} - The feed data or placeholder response.
+ */
+async function mapAndExecuteFeeds(unifiedFeed, userConfig) {
+  const source = (unifiedFeed.source || '').toLowerCase();
+  
+  switch (source) {
+    case 'x':
+      return getXFirehose(unifiedFeed, userConfig);
+    case 'fred':
+      return getFREDIndicator(unifiedFeed, userConfig);
+    case 'reuters':
+      return getReutersIndicator(unifiedFeed, userConfig);
+    case 'bloomberg':
+      return getBloombergIndicator(unifiedFeed, userConfig);
+    default:
+      throw new Error(`[Feeds] Unsupported feed source: "${source}". Supported: x, fred, reuters, bloomberg`);
+  }
+}
+
 module.exports = {
   getXFirehose,
   getFREDIndicator,
   getReutersIndicator,
-  getBloombergIndicator
+  getBloombergIndicator,
+  mapAndExecuteFeeds
 };
