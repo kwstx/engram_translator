@@ -41,17 +41,18 @@ task_worker = TaskWorker()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Store services in app state for access from routers
+    app.state.discovery_service = discovery_service
+    app.state.task_worker = task_worker
+    
     # Initialize DB (create tables if they don't exist)
     # await init_db()
-    # Start Discovery Service
-    # await discovery_service.start_periodic_discovery()
-    # Start Task Worker
-    # await task_worker.start()
+    
     yield
-    # Stop Task Worker
-    # await task_worker.stop()
-    # Stop Discovery Service
-    # await discovery_service.stop_periodic_discovery()
+    
+    # Graceful shutdown
+    await discovery_service.stop_periodic_discovery()
+    await task_worker.stop()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

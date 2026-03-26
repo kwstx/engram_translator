@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlmodel import Session, select
 from app.db.session import get_session
 from app.db.models import (
@@ -517,3 +517,27 @@ async def upload_ontology(name: str, rdf_xml: str, db: Session = Depends(get_ses
     # Load into memory-based RDFlib graph
     ontology_manager.load_ontology(rdf_xml, format="xml")
     return {"status": "success", "id": str(ontology.id)}
+
+
+@router.post(
+    "/daemon/start",
+    tags=["Daemon"],
+    summary="Start background orchestration services",
+    description="Launches the background DiscoveryService and TaskWorker using asyncio.create_task.",
+)
+async def start_daemon(request: Request):
+    """
+    Triggers the background orchestration loop.
+    This starts the periodic agent discovery and task polling workers.
+    """
+    # 1. Start discovery loop
+    await request.app.state.discovery_service.start_periodic_discovery()
+    
+    # 2. Start worker loop
+    await request.app.state.task_worker.start()
+    
+    return {
+        "status": "online",
+        "services": ["DiscoveryService", "TaskWorker"],
+        "timestamp": datetime.now(timezone.utc)
+    }

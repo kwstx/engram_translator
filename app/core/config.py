@@ -1,9 +1,30 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
-from typing import Optional
+from typing import Optional, Any
+import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 class Settings(BaseSettings):
+    @model_validator(mode="before")
+    @classmethod
+    def load_engram_config_yaml(cls, data: Any) -> Any:
+        config_path = os.path.expanduser("~/.engram/config.yaml")
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path, "r") as f:
+                    yaml_data = yaml.safe_load(f)
+                    if isinstance(yaml_data, dict):
+                        # Use dict approach since we're in "before" mode
+                        # If data is a dict (standard for BaseSettings __init__), update it
+                        for key, value in yaml_data.items():
+                            key_upper = key.upper()
+                            if key_upper not in data:
+                                data[key_upper] = value
+            except Exception:
+                pass
+        return data
+
     PROJECT_NAME: str = "Agent Translator Middleware"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
@@ -12,6 +33,11 @@ class Settings(BaseSettings):
     SENTRY_DSN: Optional[str] = None
     RATE_LIMIT_DEFAULT: str = "100/minute"
     RATE_LIMIT_ENABLED: bool = True
+    
+    # Core Runtime (from ~/.engram/config.yaml)
+    MODEL_PROVIDER: str = "openai"
+    BASE_URL: str = "http://localhost:8000"
+    DEFAULT_PERSONALITY: str = "optimistic"
     
     # Postgres
     POSTGRES_SERVER: str = "db"
