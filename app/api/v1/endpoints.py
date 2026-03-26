@@ -26,8 +26,10 @@ from app.services.mapping_failures import (
     apply_ml_suggestion,
 )
 
-router = APIRouter(dependencies=[require_scopes([])])
-_beta_orchestrator = Orchestrator()
+from bridge.router import routeTo
+# from app.messaging.orchestrator import Orchestrator
+
+# _beta_orchestrator = Orchestrator()
 
 class MiroFishPipeRequest(BaseModel):
     agent_id: str = Field(..., description="The ID of the originating AI agent.")
@@ -72,10 +74,12 @@ async def pipe_to_mirofish(
     
     # Simple pass-through translation for now
     try:
-        translated_result = _beta_orchestrator.handoff(
-            request.payload, request.protocol, "MCP"
+        translated_payload = await routeTo(
+            target="MCP",
+            payload=request.payload,
+            source_protocol=request.protocol,
+            correlation_id=request.agent_id
         )
-        translated_payload = translated_result.translated_message
     except Exception:
         translated_payload = request.payload # Fallback
         
@@ -291,8 +295,11 @@ async def beta_translate_message(
     _principal: Dict[str, Any] = require_scopes(["translate:beta"]),
 ):
     try:
-        result = _beta_orchestrator.handoff(
-            request.payload, request.source_protocol, request.target_protocol
+        result_payload = await routeTo(
+            target=request.target_protocol,
+            payload=request.payload,
+            source_protocol=request.source_protocol,
+            correlation_id="beta-translate"
         )
         record_translation_success(
             "beta", request.source_protocol.upper(), request.target_protocol.upper()
@@ -303,7 +310,7 @@ async def beta_translate_message(
                 f"Translated message from {request.source_protocol} "
                 f"to {request.target_protocol}"
             ),
-            payload=result.translated_message,
+            payload=result_payload,
             mapping_suggestions=[],
         )
     except Exception as exc:
@@ -356,8 +363,11 @@ async def playground_translate_message(
     db: Session = Depends(get_session),
 ):
     try:
-        result = _beta_orchestrator.handoff(
-            request.payload, request.source_protocol, request.target_protocol
+        result_payload = await routeTo(
+            target=request.target_protocol,
+            payload=request.payload,
+            source_protocol=request.source_protocol,
+            correlation_id="playground"
         )
         return BetaTranslateResponse(
             status="success",
@@ -365,7 +375,7 @@ async def playground_translate_message(
                 f"Translated message from {request.source_protocol} "
                 f"to {request.target_protocol}"
             ),
-            payload=result.translated_message,
+            payload=result_payload,
             mapping_suggestions=[],
         )
     except Exception as exc:

@@ -130,6 +130,16 @@ class SwarmMemory:
             "timestamp": timestamp
         }
 
+    def check_exists(self, key: str, value: Any, agent_id: Optional[str] = None) -> bool:
+        """Checks if a specific fact exists in memory."""
+        val_safe = f"'{value}'" if isinstance(value, str) else value
+        query_str = f"fact(A, '{key}', {val_safe}, T)"
+        if agent_id:
+            query_str = f"fact('{agent_id}', '{key}', {val_safe}, T)"
+        
+        results = list(self.prolog.query(query_str))
+        return len(results) > 0
+
     def query(self, key: str, agent_id: Optional[str] = None):
         """Queries the memory and resolves conflicts using pyDatalog latest-timestamp rules."""
         # 1. Fetch relevant facts from Prolog

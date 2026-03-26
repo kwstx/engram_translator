@@ -12,6 +12,7 @@ from app.db.models import Task, TaskStatus, AgentMessage, AgentMessageStatus
 from app.db.session import engine
 from app.messaging.orchestrator import Orchestrator
 from app.services.queue import lease_task
+from bridge.router import routeTo
 
 logger = structlog.get_logger(__name__)
 
@@ -75,15 +76,18 @@ class TaskWorker:
         now = datetime.now(timezone.utc)
         try:
             await self._orchestrator.translator.refresh_delta_mappings(session)
-            result = self._orchestrator.handoff(
-                task.source_message,
-                task.source_protocol,
-                task.target_protocol,
+            # Use reliable routeTo instead of direct handoff
+            translated_message = await routeTo(
+                target=task.target_protocol,
+                payload=task.source_message,
+                source_protocol=task.source_protocol,
+                correlation_id=str(task.id),
+                retry_count=task.attempts
             )
             message = AgentMessage(
                 task_id=task.id,
                 agent_id=task.target_agent_id,
-                payload=result.translated_message,
+                payload=translated_message,
                 status=AgentMessageStatus.PENDING,
                 max_attempts=settings.AGENT_MESSAGE_MAX_ATTEMPTS,
             )
