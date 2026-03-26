@@ -21,6 +21,7 @@ class TranslatorEngine:
         # Dictionary mapping (source_protocol, target_protocol) to the transformation function
         self._mappers: Dict[tuple[str, str], Callable[[Dict[str, Any]], Dict[str, Any]]] = {
             ("A2A", "MCP"): self._translate_a2a_to_mcp,
+            ("NL", "MCP"): self._translate_nl_to_mcp,
             # Placeholder for other mappings
             # ("MCP", "A2A"): self._translate_mcp_to_a2a,
         }
@@ -315,6 +316,29 @@ class TranslatorEngine:
 
             # Default passthrough with value normalization
             translated[key] = self._process_value(value)
+            
+        return translated
+
+    def _translate_nl_to_mcp(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Translates a Natural Language (NL) command into structured MCP.
+        Simple rule-based mapping for demonstration of 'intent detection'.
+        """
+        cmd = message.get("command", "").lower()
+        translated = {"coord": "research"} # Default
+        
+        if "predict" in cmd or "market" in cmd or "price" in cmd:
+            translated["intent"] = "predict"
+            translated["content"] = message.get("command")
+        elif "status" in cmd:
+            translated["intent"] = "check_status"
+        else:
+            translated["intent"] = "general_query"
+            translated["content"] = message.get("command")
+            
+        # Add metadata if present
+        if "metadata" in message:
+            translated["metadata"] = self._process_value(message["metadata"])
             
         return translated
 

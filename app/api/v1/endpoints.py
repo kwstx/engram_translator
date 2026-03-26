@@ -541,3 +541,21 @@ async def start_daemon(request: Request):
         "services": ["DiscoveryService", "TaskWorker"],
         "timestamp": datetime.now(timezone.utc)
     }
+
+class DelegateRequest(BaseModel):
+    command: str = Field(..., description="The natural language command to delegate.")
+    source_agent: str = Field(default="HTTP Client", description="The ID of the originating agent.")
+
+@router.post(
+    "/delegate",
+    tags=["Delegation"],
+    summary="Delegate a subtask via natural language",
+    description="Parses a natural language command, detects intent, and routes to a specialized agent.",
+)
+async def delegate_task(request: DelegateRequest):
+    """
+    Delegates a task using the DelegationEngine.
+    """
+    from delegation.engine import delegation_engine
+    result = await delegation_engine.delegate_subtask(request.command, request.source_agent)
+    return result

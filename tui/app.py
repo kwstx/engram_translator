@@ -183,8 +183,17 @@ class EngramTUI(App):
             log_view.write("ℹ️ [bold green]System Status:[/] All services operating within normal parameters.")
         elif cmd == "/agents":
             log_view.write("ℹ️ [bold yellow]Agents:[/] No active agent connections yet.")
-        else:
+        elif cmd.startswith("/"):
             log_view.write(f"⚠️ Unknown command: [dim]{cmd}[/]")
+        else:
+            # Natural Language Delegation
+            from delegation.engine import delegation_engine
+            # Process as an async task to avoid blocking the UI thread
+            async def run_delegation():
+                await delegation_engine.delegate_subtask(cmd)
+
+            # In Textual, we can use run_worker to execute async functions
+            self.run_worker(run_delegation())
             
         self.query_one("#command-input", Input).value = ""
 
