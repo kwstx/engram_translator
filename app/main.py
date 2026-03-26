@@ -97,3 +97,21 @@ async def root():
 # Include API v1 routers
 app.include_router(endpoints.router, prefix=settings.API_V1_STR)
 app.include_router(discovery.router, prefix=settings.API_V1_STR)
+
+if __name__ == "__main__":
+    import threading
+    import uvicorn
+    from textual import run
+    from tui.app import EngramTUI
+
+    # Run the FastAPI server in a background thread to allow the TUI to own the main thread
+    def start_api():
+        # Running on localhost for the bridge
+        uvicorn.run(app, host="127.0.0.1", port=8000, log_level="error")
+
+    api_thread = threading.Thread(target=start_api, daemon=True)
+    api_thread.start()
+
+    # Launch the Engram TUI
+    # This design is heavily inspired by modern terminal agents like Claude Code
+    run(EngramTUI)
