@@ -1,0 +1,92 @@
+import httpx
+import structlog
+from typing import Any, Dict, Optional
+from .base import BaseConnector
+from app.core.config import settings
+
+logger = structlog.get_logger(__name__)
+
+class SlackConnector(BaseConnector):
+    """
+    Connector for Slack.
+    Translates Engram's unified MCP task format into Slack API format.
+    """
+
+    def __init__(self, api_token: Optional[str] = None):
+        super().__init__(name="SLACK")
+        self.api_token = api_token or settings.SLACK_API_TOKEN
+        self.base_url = "https://slack.com/api/chat.postMessage"
+
+    def translate_to_tool(self, engram_task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        MCP -> Slack API format (chat.postMessage).
+        Expected MCP task: {"coord": "notify", "channel": "#general", "content": "Hello Slack!"}
+        """
+        prompt = engram_task.get("content", engram_task.get("coord", ""))
+        channel = engram_task.get("channel", "#general")
+        
+        return {
+            "channel": channel,
+            "text": f"*Engram Notification*\n{prompt}",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{engram_task.get('title', 'Engram Activity')}*\n{prompt}"
+                    }
+                }
+            ]
+        }
+
+    def translate_from_tool(self, tool_response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Slack Response -> Engram Unified Format.
+        """
+        ok = tool_response.get("ok", False)
+        ts = tool_response.get("ts", "")
+        error = tool_response.get("error", "unknown")
+        
+        return {
+                "status": "success" if ok else "error",
+                "protocol": "MCP",
+                "payload": {
+                    "coord": "slack_ack",
+                    "ok": ok,
+                    "timestamp": ts,
+                    "error": error if not ok else None
+                },
+                "metadata": {
+                    "tool": "slack",
+                    "channel": tool_response.get("channel", "")
+                }
+            }
+
+    async def call_tool(self, tool_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Performs the actual API call to Slack.
+        """
+        if not self.api_token:
+            logger.warning("SlackConnector: missing API token, returning mock response")
+            return self._mock_call(tool_request)
+
+        headers = {
+            "authorization": f"Bearer {self.api_token}",
+            "content-type": "application/json"
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(self.base_url, json=tool_request, headers=headers)
+            response.raise_for_status()
+            return response.json()
+
+    def _mock_call(self, tool_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Returns a mock ACK if no API token is provided.
+        """
+        return {
+            "ok": True,
+            "channel": tool_request.get("channel", "#general"),
+            "ts": "123456789.0001",
+            "message": tool_request.get("text", "")
+        }

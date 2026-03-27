@@ -7,7 +7,7 @@ from app.core.translator import TranslatorEngine
 from app.core.exceptions import HandoffRoutingError, HandoffAuthorizationError
 from app.core.metrics import record_translation_error, record_translation_success
 from app.core.security import verify_engram_token
-from app.services.mirofish_router import pipe_to_mirofish_swarm
+from app.messaging.connectors.registry import get_default_registry
 
 logger = structlog.get_logger(__name__)
 
@@ -187,6 +187,12 @@ class Orchestrator:
 
         # Build the graph from the translator's registered pairs
         self.protocol_graph.build_from_translator(self.translator)
+        
+        # Initialize Tool Connectors
+        self.connector_registry = get_default_registry()
+        # Add connectors to the protocol graph so they can be discovered as valid targets
+        for connector_name in self.connector_registry.list_connectors():
+            self.protocol_graph.add_protocol(connector_name)
 
     # -- Graph management ---------------------------------------------------
 
@@ -328,82 +334,41 @@ class Orchestrator:
             )
 
         # -----------------------------------------------------------------
-        # MiroFish bridge — intercept when target platform is "MIROFISH".
-        # The existing translation layer normalises the payload before
-        # injection so semantic fidelity is preserved.  Users must first
-        # launch their own MiroFish instance with their personal
-        # LLM_API_KEY in its .env file.
+        # Tool Connectors — Check if target protocol is a registered tool.
+        # This modular approach supports Claude, Slack, Perplexity, MiroFish etc.
         # -----------------------------------------------------------------
-        if tgt == "MIROFISH":
-            logger.info(
-                "Handoff: routing to MiroFish swarm bridge",
-                source_protocol=src,
-            )
-            if isinstance(source_message, dict):
-                mirofish_meta = source_message.get("metadata", source_message.get("meta", {}))
-                if not isinstance(mirofish_meta, dict):
-                    mirofish_meta = {}
-            else:
-                mirofish_meta = {}
-
-            swarm_id = mirofish_meta.get("swarmId")
-            num_agents = mirofish_meta.get("numAgents")
-            mirofish_base_url = mirofish_meta.get("mirofishBaseUrl")
-            external_data = mirofish_meta.get("externalData")
-
+        if self.connector_registry.has_connector(tgt):
+            logger.info("Handoff: routing to tool connector", target=tgt)
+            connector = self.connector_registry.get_connector(tgt)
+            
+            # Since handoff is synchronous, we run the connector's execute in a new loop if needed,
+            # but ideally connectors should be called via handoff_async.
+            # For simplicity in this legacy method, we use asyncio.run or similar.
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+                # Basic sync-over-async
+                import asyncio as _aio
+                try:
+                    loop = _aio.get_running_loop()
+                    # If we are in a loop, we have to use a thread or similar
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as pool:
-                        result = loop.run_in_executor(
-                            pool,
-                            lambda: asyncio.run(
-                                pipe_to_mirofish_swarm(
-                                    message=source_message,
-                                    external_data=external_data,
-                                    swarm_id=swarm_id,
-                                    num_agents=num_agents,
-                                    mirofish_base_url=mirofish_base_url,
-                                    source_protocol=src,
-                                )
-                            ),
-                        )
-                        import asyncio as _aio
-                        mirofish_result = _aio.get_event_loop().run_until_complete(result)
-                else:
-                    mirofish_result = loop.run_until_complete(
-                        pipe_to_mirofish_swarm(
-                            message=source_message,
-                            external_data=external_data,
-                            swarm_id=swarm_id,
-                            num_agents=num_agents,
-                            mirofish_base_url=mirofish_base_url,
-                            source_protocol=src,
-                        )
-                    )
-            except RuntimeError:
-                # Fallback: no running event loop
-                mirofish_result = asyncio.run(
-                    pipe_to_mirofish_swarm(
-                        message=source_message,
-                        external_data=external_data,
-                        swarm_id=swarm_id,
-                        num_agents=num_agents,
-                        mirofish_base_url=mirofish_base_url,
-                        source_protocol=src,
-                    )
+                        future = loop.run_in_executor(pool, lambda: _aio.run(connector.execute(source_message, src)))
+                        result = _aio.get_event_loop().run_until_complete(future)
+                except RuntimeError:
+                    result = _aio.run(connector.execute(source_message, src))
+                
+                return HandoffResult(
+                    translated_message=result,
+                    route=[src, tgt],
+                    total_weight=1.0, # Target reached
                 )
-
-            if isinstance(mirofish_result, dict) and mirofish_result.get("status") == "error":
-                record_translation_error("orchestrator", src, "MIROFISH")
-            else:
-                record_translation_success("orchestrator", src, "MIROFISH")
-            return HandoffResult(
-                translated_message=mirofish_result,
-                route=[src, "MIROFISH"],
-                total_weight=0.0,
-            )
+            except Exception as e:
+                logger.error("Connector execution failed in handoff", tool=tgt, error=str(e))
+                return HandoffResult(
+                    translated_message={"status": "error", "detail": str(e)},
+                    route=[src, tgt],
+                    total_weight=1.0
+                )
 
         # Find the optimal route
         path, total_weight = self.protocol_graph.find_shortest_path(src, tgt)
@@ -468,34 +433,18 @@ class Orchestrator:
         tgt = target_protocol.upper()
 
         # Authorization is handled inside handoff() but we need to pass the eat
-        if tgt == "MIROFISH":
-            # Direct async handling for MiroFish to avoid blocking
-            # But we still need to authorize first
+        # 1. Authorization is handled inside _verify_eat_authorization
+        # (We call it here because we intercept the tool routing)
+        if self.connector_registry.has_connector(tgt):
             auth_payload = self._verify_eat_authorization(source_message, src, tgt, eat)
-            logger.info("Handoff async authorized (MiroFish)", user_id=auth_payload.get("sub"))
+            logger.info("Handoff async authorized for tool", tool=tgt, user_id=auth_payload.get("sub"))
             
-            if isinstance(source_message, dict):
-                mirofish_meta = source_message.get("metadata", source_message.get("meta", {}))
-                if not isinstance(mirofish_meta, dict):
-                    mirofish_meta = {}
-            else:
-                mirofish_meta = {}
-
-            mirofish_result = await pipe_to_mirofish_swarm(
-                message=source_message,
-                external_data=mirofish_meta.get("externalData"),
-                swarm_id=mirofish_meta.get("swarmId"),
-                num_agents=mirofish_meta.get("numAgents"),
-                mirofish_base_url=mirofish_meta.get("mirofishBaseUrl"),
-                source_protocol=src,
-            )
-            if isinstance(mirofish_result, dict) and mirofish_result.get("status") == "error":
-                record_translation_error("orchestrator", src, "MIROFISH")
-            else:
-                record_translation_success("orchestrator", src, "MIROFISH")
+            connector = self.connector_registry.get_connector(tgt)
+            result = await connector.execute(source_message, src)
+            
             return HandoffResult(
-                translated_message=mirofish_result,
-                route=[src, "MIROFISH"],
+                translated_message=result,
+                route=[src, tgt],
                 total_weight=0.0,
             )
 
