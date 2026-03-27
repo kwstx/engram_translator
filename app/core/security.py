@@ -7,6 +7,9 @@ from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from passlib.context import CryptContext
 
 from app.core.config import settings
+from app.db.session import get_session
+from app.db.models import PermissionProfile
+from sqlmodel import Session, select
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -32,6 +35,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         "iat": int(datetime.now(timezone.utc).timestamp())
     })
     return jwt.encode(to_encode, _get_verification_key(), algorithm=settings.AUTH_JWT_ALGORITHM)
+
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login",
@@ -89,3 +93,26 @@ async def get_current_principal(
 
 def require_scopes(scopes: List[str]):
     return Security(get_current_principal, scopes=scopes)
+
+
+async def check_permissions(
+    tool_id: str,
+    scope: str,
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal),
+):
+    user_id = principal.get("sub")
+    statement = select(PermissionProfile).where(PermissionProfile.user_id == user_id)
+    result = await db.execute(statement)
+    profile = result.scalars().first()
+
+    if not profile:
+        raise HTTPException(status_code=403, detail="Permission profile not found.")
+
+    tool_perms = profile.permissions.get(tool_id, [])
+    if scope not in tool_perms:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Insufficient permissions. Scope '{scope}' for tool '{tool_id}' required."
+        )
+    return True

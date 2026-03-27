@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from app.db.session import get_session
-from app.db.models import User
+from app.db.models import User, PermissionProfile
 from app.core.security import get_password_hash, verify_password, create_access_token
 from pydantic import BaseModel, EmailStr
 
@@ -45,6 +45,20 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_session)):
         user_metadata=user_in.user_metadata,
     )
     db.add(db_obj)
+    await db.flush()  # To get db_obj.id
+
+    # Create default permission profile
+    default_permissions = {
+        "core_translator": ["read", "execute"],
+        "discovery": ["read"]
+    }
+    perm_profile = PermissionProfile(
+        user_id=db_obj.id,
+        profile_name="Standard",
+        permissions=default_permissions
+    )
+    db.add(perm_profile)
+
     await db.commit()
     await db.refresh(db_obj)
     return db_obj
