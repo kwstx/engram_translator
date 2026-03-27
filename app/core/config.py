@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     AUTH_JWT_ALGORITHM: str = "HS256"
     AUTH_JWT_SECRET: Optional[str] = None
     AUTH_JWT_PUBLIC_KEY: Optional[str] = None
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 

@@ -1,13 +1,40 @@
 from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import OAuth2PasswordBearer, SecurityScopes
+from passlib.context import CryptContext
 
 from app.core.config import settings
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({
+        "exp": int(expire.timestamp()),
+        "iss": settings.AUTH_ISSUER,
+        "aud": settings.AUTH_AUDIENCE,
+        "iat": int(datetime.now(timezone.utc).timestamp())
+    })
+    return jwt.encode(to_encode, _get_verification_key(), algorithm=settings.AUTH_JWT_ALGORITHM)
+
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/auth/token",
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
     scopes={
         "translate:a2a": "Translate messages using A2A protocol scope.",
         "translate:beta": "Access beta translation endpoints for enterprise users.",

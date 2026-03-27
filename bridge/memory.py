@@ -30,11 +30,11 @@ class MemoryQueryResponse(BaseModel):
     agent_id: str
     timestamp: float
 
+pyDatalog.create_terms('A, X, Y, Z, A2, Y2, Z2, latest_fact, fact_data')
+
 class SwarmMemory:
     def __init__(self):
         self.prolog = Prolog()
-        # Initialize pyDatalog terms
-        pyDatalog.create_terms('A, X, Y, Z, A2, Y2, Z2, latest_fact, fact_data')
         
         # Load existing ontology
         ontology_folder = os.path.join(os.getcwd(), "app/semantic")

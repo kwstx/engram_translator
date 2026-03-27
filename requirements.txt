@@ -27,4 +27,6 @@ rich>=13.7.0
 pyyaml>=6.0.1
 pyswip>=0.2.10
 ccxt>=4.2.10
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.0
 requests>=2.31.0

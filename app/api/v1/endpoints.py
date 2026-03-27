@@ -26,6 +26,8 @@ from app.services.mapping_failures import (
     apply_ml_suggestion,
 )
 
+router = APIRouter()
+
 from bridge.router import routeTo
 # from app.messaging.orchestrator import Orchestrator
 

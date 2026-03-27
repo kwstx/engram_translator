@@ -61,6 +61,7 @@ async def init_db():
             Task,
             AgentMessage,
             MappingFailureLog,
+            User,
         )
         await conn.run_sync(SQLModel.metadata.create_all)
         if engine.dialect.name == "postgresql":
@@ -76,6 +77,7 @@ async def _ensure_timestamptz(conn) -> None:
         "tasks": ["leased_until", "created_at", "updated_at", "completed_at", "dead_lettered_at"],
         "agent_messages": ["leased_until", "created_at", "updated_at", "acked_at"],
         "mapping_failure_logs": ["created_at"],
+        "users": ["created_at", "updated_at"],
     }
 
     for table, cols in columns.items():

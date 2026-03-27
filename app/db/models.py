@@ -206,3 +206,24 @@ class MappingFailureLog(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True)),
     )
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    email: str = Field(index=True, unique=True, nullable=False)
+    hashed_password: str = Field(nullable=False)
+    user_metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
+    )

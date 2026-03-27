@@ -23,7 +23,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1 import endpoints, discovery
+from app.api.v1 import endpoints, discovery, auth
 from bridge.memory import router as memory_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -101,6 +101,7 @@ async def root():
     return {"message": "Agent Translator Middleware is Online", "version": "0.1.0"}
 
 # Include API v1 routers
+app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Auth"])
 app.include_router(endpoints.router, prefix=settings.API_V1_STR)
 app.include_router(discovery.router, prefix=settings.API_V1_STR)
 app.include_router(memory_router, prefix=settings.API_V1_STR)
