@@ -28,11 +28,13 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Agent Translator Middleware"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
-    HTTPS_ONLY: bool = False
+    HTTPS_ONLY: bool = False  # Set to True in production .env
+    SANDBOX_ENABLED: bool = True
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: Optional[str] = None
     RATE_LIMIT_DEFAULT: str = "100/minute"
     RATE_LIMIT_ENABLED: bool = True
+
     
     # Core Runtime (from ~/.engram/config.yaml)
     MODEL_PROVIDER: str = "openai"

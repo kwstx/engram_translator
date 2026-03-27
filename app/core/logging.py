@@ -1,10 +1,23 @@
 import logging
-from typing import Optional
+import re
+from typing import Optional, Any, Dict
 
 import structlog
 
 from app.core.config import settings
 
+SENSITIVE_KEYS = {"token", "password", "key", "secret", "authorization", "cookie", "jwt", "auth"}
+
+def mask_sensitive_data(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Masks values of sensitive keys in the log event."""
+    for key in event_dict:
+        if any(sk in key.lower() for sk in SENSITIVE_KEYS):
+            val = event_dict[key]
+            if isinstance(val, str) and len(val) > 8:
+                event_dict[key] = f"{val[:4]}...{val[-4:]}"
+            else:
+                event_dict[key] = "********"
+    return event_dict
 
 def configure_logging(log_level: Optional[str] = None) -> None:
     """Configure structured JSON logging via structlog."""
@@ -37,6 +50,7 @@ def configure_logging(log_level: Optional[str] = None) -> None:
         + [
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
+            mask_sensitive_data,
             tui_logger_processor,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
@@ -44,3 +58,4 @@ def configure_logging(log_level: Optional[str] = None) -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
+

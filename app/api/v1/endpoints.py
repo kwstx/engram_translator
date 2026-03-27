@@ -37,14 +37,16 @@ class MiroFishPipeRequest(BaseModel):
     agent_id: str = Field(..., description="The ID of the originating AI agent.")
     protocol: str = Field(..., description="The protocol of the incoming message (e.g., A2A, MCP).")
     payload: Dict[str, Any] = Field(..., description="Wrapper for seed_text and num_agents.")
-    # For documentation and validation, explicitly mention subfields:
-    # payload['seed_text']: str
-    # payload['num_agents']: int (optional, default 1000)
     swarm_id: str = Field(default="default", description="The target MiroFish swarm simulation identifier.")
+
+    model_config = ConfigDict(extra="forbid")
 
 class MiroFishGodsEyeRequest(BaseModel):
     swarm_id: str = Field(..., description="The target MiroFish swarm simulation identifier.")
     context_objects: List[Dict[str, Any]] = Field(..., description="Live external events (prices, messages) to inject mid-simulation.")
+
+    model_config = ConfigDict(extra="forbid")
+
 
 class MiroFishPipeResponse(BaseModel):
     status: str
@@ -172,6 +174,7 @@ class TranslateRequest(BaseModel):
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "examples": [
                 {
@@ -219,6 +222,7 @@ class BetaTranslateRequest(BaseModel):
     payload: Dict[str, Any] = Field(..., description="Protocol-specific payload.")
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "examples": [
                 {
