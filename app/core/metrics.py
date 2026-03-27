@@ -2,8 +2,9 @@ from collections import deque
 from threading import Lock
 import time
 
-from prometheus_client import Counter, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
+# Translation Metrics
 TRANSLATIONS_TOTAL = Counter(
     "translations_total",
     "Total number of translations completed",
@@ -26,6 +27,40 @@ TRANSLATION_ERROR_RATE = Gauge(
     "translation_error_rate",
     "Rolling translation error rate over the last 60 seconds (0-1)",
     ["channel"],
+)
+
+# Task Metrics
+TASKS_STARTED_TOTAL = Counter(
+    "tasks_started_total",
+    "Total number of tasks started",
+    ["task_type", "user_id"],
+)
+
+TASKS_COMPLETED_TOTAL = Counter(
+    "tasks_completed_total",
+    "Total number of tasks completed",
+    ["task_type", "user_id", "status"],
+)
+
+TASK_LATENCY_SECONDS = Histogram(
+    "task_latency_seconds",
+    "Task execution latency in seconds",
+    ["task_type", "user_id"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, float("inf")),
+)
+
+# Connector Metrics
+CONNECTOR_CALLS_TOTAL = Counter(
+    "connector_calls_total",
+    "Total number of connector calls",
+    ["connector", "user_id", "status"],
+)
+
+CONNECTOR_LATENCY_SECONDS = Histogram(
+    "connector_latency_seconds",
+    "Connector call latency in seconds",
+    ["connector", "user_id"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, float("inf")),
 )
 
 _WINDOW_SECONDS = 60
@@ -82,3 +117,27 @@ def record_translation_error(
     with _lock:
         _error_events_by_channel.setdefault(channel, deque()).append(now)
         _update_rates(channel, now)
+
+
+def record_task_start(task_type: str, user_id: str) -> None:
+    TASKS_STARTED_TOTAL.labels(task_type=task_type, user_id=user_id).inc()
+
+
+def record_task_completion(
+    task_type: str, user_id: str, status: str, duration: float
+) -> None:
+    TASKS_COMPLETED_TOTAL.labels(
+        task_type=task_type, user_id=user_id, status=status
+    ).inc()
+    TASK_LATENCY_SECONDS.labels(task_type=task_type, user_id=user_id).observe(duration)
+
+
+def record_connector_call(
+    connector: str, user_id: str, status: str, duration: float
+) -> None:
+    CONNECTOR_CALLS_TOTAL.labels(
+        connector=connector, user_id=user_id, status=status
+    ).inc()
+    CONNECTOR_LATENCY_SECONDS.labels(connector=connector, user_id=user_id).observe(
+        duration
+    )

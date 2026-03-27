@@ -11,6 +11,7 @@ from app.db.session import get_session
 from app.core.security import get_current_principal, verify_engram_token
 from app.db.models import Task, TaskStatus
 from app.messaging.multi_agent_orchestrator import MultiAgentOrchestrator
+from app.core.logging import bind_context
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -43,6 +44,9 @@ async def submit_multi_agent_task(
     Submits a complex natural language task for multi-agent execution.
     Verifies the EAT, parses the task into a plan, and enqueues it.
     """
+    user_id = str(principal.get("sub"))
+    bind_context(user_id=user_id)
+    
     eat = principal.get("_raw_token")
     if not eat:
         raise HTTPException(
@@ -87,7 +91,7 @@ async def submit_multi_agent_task(
     await db.commit()
     await db.refresh(task)
     
-    logger.info("Task submitted", task_id=task.id, user_id=principal.get("sub"))
+    logger.info("Task submitted", task_id=task.id)
     
     return {
         "task_id": task.id,
@@ -104,6 +108,9 @@ async def get_task_status(
     """
     Retrieves the status and results of a submitted task.
     """
+    bind_context(user_id=str(principal.get("sub")), task_id=str(task_id))
+    logger.debug("Polling task status")
+    
     stmt = select(Task).where(Task.id == task_id)
     res = await db.execute(stmt)
     task = res.scalars().first()
@@ -111,9 +118,6 @@ async def get_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    # Basic authorization: Verify user is the same as the one who submitted?
-    # For now, we allow reading tasks if they exist, but ideally we check principal['sub']
-    
     return task
 
 @router.get("/", response_model=List[TaskStatusResponse])

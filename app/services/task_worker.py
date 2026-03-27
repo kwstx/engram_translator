@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,6 +14,9 @@ from app.db.session import engine
 from app.messaging.orchestrator import Orchestrator
 from app.services.queue import lease_task
 from bridge.router import routeTo
+from app.core.metrics import record_task_start, record_task_completion
+from app.core.logging import bind_context, unbind_context
+from app.core.security import verify_engram_token
 
 logger = structlog.get_logger(__name__)
 
@@ -63,7 +67,34 @@ class TaskWorker:
                     if not task:
                         await asyncio.sleep(self.poll_interval_seconds)
                         continue
-                    await self._process_task(session, task)
+                    
+                    # Extract user_id from EAT if possible for metrics
+                    user_id = "unknown"
+                    try:
+                        if task.eat:
+                            payload = verify_engram_token(task.eat)
+                            user_id = str(payload.get("sub", "unknown"))
+                    except:
+                        pass
+                        
+                    bind_context(task_id=str(task.id), user_id=user_id, worker_id=self.worker_id)
+                    logger.info("Task leased", task_type=task.target_protocol)
+                    record_task_start(task.target_protocol, user_id)
+                    
+                    start_time = time.time()
+                    try:
+                        await self._process_task(session, task)
+                        duration = time.time() - start_time
+                        record_task_completion(task.target_protocol, user_id, "success", duration)
+                        logger.info("Task completed successfully", duration=duration)
+                    except Exception as e:
+                        duration = time.time() - start_time
+                        record_task_completion(task.target_protocol, user_id, "failure", duration)
+                        logger.error("Task failed", error=str(e), duration=duration)
+                        # Re-raise or handle in _process_task? _process_task already handles commit and status update
+                    finally:
+                        unbind_context("task_id", "user_id")
+
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -77,7 +108,7 @@ class TaskWorker:
         try:
             await self._orchestrator.translator.refresh_delta_mappings(session)
             if task.target_protocol == "MULTI_AGENT":
-                logger.info("Executing multi-agent orchestration task", task_id=task.id)
+                logger.debug("Executing multi-agent orchestration task")
                 from app.messaging.multi_agent_orchestrator import MultiAgentOrchestrator
                 multi_orch = MultiAgentOrchestrator(orchestrator=self._orchestrator)
                 
@@ -149,3 +180,4 @@ class TaskWorker:
                 task.status = TaskStatus.PENDING
             task.updated_at = now
             await session.commit()
+            raise # Re-raise to let the caller log it properly

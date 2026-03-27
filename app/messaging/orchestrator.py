@@ -1,13 +1,15 @@
 import asyncio
 import structlog
 import networkx as nx
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from app.core.translator import TranslatorEngine
 from app.core.exceptions import HandoffRoutingError, HandoffAuthorizationError
-from app.core.metrics import record_translation_error, record_translation_success
+from app.core.metrics import record_translation_error, record_translation_success, record_connector_call
 from app.core.security import verify_engram_token
 from app.messaging.connectors.registry import get_default_registry
+from app.core.logging import bind_context
 
 logger = structlog.get_logger(__name__)
 
@@ -312,9 +314,12 @@ class Orchestrator:
         auth_payload = self._verify_eat_authorization(
             source_message, src, tgt, eat
         )
+        user_id = auth_payload.get("sub", "unknown")
+        bind_context(user_id=user_id, source_protocol=src, target_protocol=tgt)
+
         logger.info(
             "Handoff authorized",
-            user_id=auth_payload.get("sub"),
+            user_id=user_id,
             source_protocol=src,
             target_protocol=tgt,
         )
@@ -344,6 +349,7 @@ class Orchestrator:
             # Since handoff is synchronous, we run the connector's execute in a new loop if needed,
             # but ideally connectors should be called via handoff_async.
             # For simplicity in this legacy method, we use asyncio.run or similar.
+            start_time = time.time()
             try:
                 # Basic sync-over-async
                 import asyncio as _aio
@@ -353,11 +359,12 @@ class Orchestrator:
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as pool:
                         # Passing None for db here as sync session is tricky, but preferably we use handoff_async
-                        future = loop.run_in_executor(pool, lambda: _aio.run(connector.execute(source_message, src, user_id=auth_payload.get("sub"))))
+                        future = loop.run_in_executor(pool, lambda: _aio.run(connector.execute(source_message, src, user_id=user_id)))
                         result = _aio.get_event_loop().run_until_complete(future)
                 except RuntimeError:
-                    result = _aio.run(connector.execute(source_message, src, user_id=auth_payload.get("sub")))
+                    result = _aio.run(connector.execute(source_message, src, user_id=user_id))
                 
+                record_connector_call(tgt, user_id, "success", time.time() - start_time)
                 return HandoffResult(
                     translated_message=result,
                     route=[src, tgt],
@@ -365,6 +372,7 @@ class Orchestrator:
                 )
             except Exception as e:
                 logger.error("Connector execution failed in handoff", tool=tgt, error=str(e))
+                record_connector_call(tgt, user_id, "error", time.time() - start_time)
                 return HandoffResult(
                     translated_message={"status": "error", "detail": str(e)},
                     route=[src, tgt],
@@ -397,9 +405,15 @@ class Orchestrator:
                 source_protocol=hop_src,
                 target_protocol=hop_tgt,
             )
-            current_message = self.translator.translate(
-                current_message, hop_src, hop_tgt
-            )
+            try:
+                current_message = self.translator.translate(
+                    current_message, hop_src, hop_tgt
+                )
+                record_translation_success("orchestrator", hop_src, hop_tgt)
+            except Exception as e:
+                logger.error("Translation hop failed", source_protocol=hop_src, target_protocol=hop_tgt, error=str(e))
+                record_translation_error("orchestrator", hop_src, hop_tgt)
+                raise
 
             hops.append(
                 HopResult(
@@ -439,18 +453,31 @@ class Orchestrator:
         # (We call it here because we intercept the tool routing)
         if self.connector_registry.has_connector(tgt):
             auth_payload = self._verify_eat_authorization(source_message, src, tgt, eat)
-            logger.info("Handoff async authorized for tool", tool=tgt, user_id=auth_payload.get("sub"))
+            user_id = auth_payload.get("sub", "unknown")
+            bind_context(user_id=user_id, source_protocol=src, target_protocol=tgt)
+            
+            logger.info("Handoff async authorized for tool", tool=tgt, user_id=user_id)
             
             connector = self.connector_registry.get_connector(tgt)
             # Inject user_id into message metadata for the connector to find if db is not passed? 
             # Better to pass db directly to execute.
-            result = await connector.execute(source_message, src, db=db, user_id=auth_payload.get("sub"))
-            
-            return HandoffResult(
-                translated_message=result,
-                route=[src, tgt],
-                total_weight=0.0,
-            )
+            start_time = time.time()
+            try:
+                result = await connector.execute(source_message, src, db=db, user_id=user_id)
+                record_connector_call(tgt, user_id, "success", time.time() - start_time)
+                return HandoffResult(
+                    translated_message=result,
+                    route=[src, tgt],
+                    total_weight=0.0,
+                )
+            except Exception as e:
+                logger.error("Connector execution failed in handoff_async", tool=tgt, error=str(e))
+                record_connector_call(tgt, user_id, "error", time.time() - start_time)
+                return HandoffResult(
+                    translated_message={"status": "error", "error": str(e)},
+                    route=[src, tgt],
+                    total_weight=0.0
+                )
 
         # Delegate standard handoff to the sync implementation
         return self.handoff(source_message, source_protocol, target_protocol, eat)

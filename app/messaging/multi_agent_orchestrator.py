@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import re
+import time
 from datetime import datetime, timezone
 import structlog
 from typing import List, Dict, Any, Optional, Tuple
@@ -22,6 +23,8 @@ from app.core.tui_bridge import tui_event_queue
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.db.models import PermissionProfile
+from app.core.metrics import record_connector_call, record_task_completion, record_task_start
+from app.core.logging import bind_context
 
 logger = structlog.get_logger(__name__)
 
@@ -45,12 +48,6 @@ class MultiAgentOrchestrator:
     ) -> Dict[str, Any]:
         """
         Coordinates a complex task across multiple agents.
-        
-        1. Verifies the user's permissions via the EAT and DB profiles.
-        2. Parses the task into subtasks and determines required agents (unless plan provided).
-        3. Routes each subtask to the relevant connector.
-        4. Collects and merges responses into a normalized output.
-        5. Handles retries and failures.
         """
         from app.db.models import Task, TaskStatus # Local import to avoid cycles
 
@@ -58,7 +55,8 @@ class MultiAgentOrchestrator:
         try:
             auth_payload = verify_engram_token(eat)
             user_id = str(auth_payload.get("sub"))
-            logger.info("Multi-agent task initiated", user_id=user_id, task=user_task, task_id=task_id)
+            bind_context(user_id=user_id, task_id=str(task_id) if task_id else None)
+            logger.info("Multi-agent task execution started", user_task=user_task)
         except Exception as e:
             logger.error("Authorization failed", error=str(e))
             raise HandoffAuthorizationError(f"Invalid or missing Engram Access Token (EAT): {str(e)}")
@@ -75,11 +73,13 @@ class MultiAgentOrchestrator:
                 await db.commit()
                 await db.refresh(db_task)
 
-        # 2. Parse Task into a Plan (Intent Detection & Planner) or use provided plan
+        # 2. Parse Task into a Plan
+        start_time = time.time()
         if not plan:
             plan = self._generate_plan(user_task)
         
         if not plan:
+            logger.warning("Planner failed to generate plan")
             tui_event_queue.put_nowait(f"⚠️ [bold yellow]Planner:[/] Could not determine subtasks for '{user_task[:30]}...'")
             err_res = {
                 "status": "error", 
@@ -91,39 +91,39 @@ class MultiAgentOrchestrator:
                 await db.commit()
             return err_res
 
-        # 3. Inform TUI of the plan
+        logger.info("Orchestration plan generated", step_count=len(plan))
         tui_event_queue.put_nowait(f"📋 [bold cyan]Orchestration Plan:[/] Split into {len(plan)} agent steps.")
 
         results = {}
         context = {"original_task": user_task}
         correlation_id = str(uuid.uuid4())
 
-        # 4. Execution Loop (Sequential with basic dependency mapping)
+        # 4. Execution Loop
         max_retries = 3
         for i, step in enumerate(plan):
             agent_name = step["agent"].upper()
             sub_command = step["command"]
             
-            # Simple context injection: replace {AgentName} with previous result if referenced
+            # Simple context injection
             for prev_agent, prev_res in results.items():
                 pattern = f"\\{{{prev_agent}\\}}"
                 if re.search(pattern, sub_command, re.IGNORECASE):
-                    # Extract a summary or content for injection
                     injection_content = prev_res.get("content") or prev_res.get("summary") or prev_res.get("result") or str(prev_res)
                     sub_command = re.sub(pattern, str(injection_content), sub_command, flags=re.IGNORECASE)
 
             # Execution with Retries
             last_err = None
             for attempt in range(max_retries):
+                logger.info("Executing step", step_index=i+1, agent=agent_name, attempt=attempt+1)
                 tui_event_queue.put_nowait(f"🔄 [yellow]Step {i+1} (Att {attempt+1}):[/] Handing off to [bold]{agent_name}[/]")
+                step_start_time = time.time()
                 try:
-                    # Permission check against Database Profile + EAT Scopes
+                    # Permission check
                     if db:
                         await self._verify_db_permissions(db, user_id, agent_name, auth_payload)
                     else:
                         self._verify_eat_scopes(auth_payload, agent_name)
 
-                    # Prepare payload for the agent
                     source_message = {
                         "command": sub_command,
                         "metadata": {
@@ -135,7 +135,6 @@ class MultiAgentOrchestrator:
                         }
                     }
                     
-                    # Execute via multi-hop Orchestrator (NL -> Agent Protocol)
                     handoff_res = await self.orchestrator.handoff_async(
                         source_message=source_message,
                         source_protocol="NL",
@@ -144,13 +143,13 @@ class MultiAgentOrchestrator:
                         db=db
                     )
                     
-                    # Capture result
                     step_result = handoff_res.translated_message
                     
-                    # Check if result is an error status (normalized connector response)
                     if isinstance(step_result, dict) and step_result.get("status") == "error":
                         err_type = step_result.get("error_type", "")
                         is_transient = step_result.get("is_transient", False)
+                        
+                        record_connector_call(agent_name, user_id, "error", time.time() - step_start_time)
                         
                         if "ExpiredToken" in err_type:
                             raise ExpiredTokenError(step_result.get("detail", "Token expired"))
@@ -162,6 +161,7 @@ class MultiAgentOrchestrator:
                             
                         raise TranslationError(step_result.get("detail", "Permanent agent execution error"))
 
+                    record_connector_call(agent_name, user_id, "success", time.time() - step_start_time)
                     results[agent_name] = step_result
                     context[f"step_{i}_result"] = step_result
                     
@@ -177,9 +177,9 @@ class MultiAgentOrchestrator:
                         }
                     )
                     
+                    logger.info("Step completed", step_index=i+1, agent=agent_name)
                     tui_event_queue.put_nowait(f"✅ [green]Step {i+1} OK:[/] [bold]{agent_name}[/] finished.")
                     
-                    # Update DB Task with partial result
                     if db and db_task:
                         if not db_task.results:
                             db_task.results = {}
@@ -192,13 +192,13 @@ class MultiAgentOrchestrator:
                     break # Success!
 
                 except ExpiredTokenError as e:
+                    logger.warning("Step auth error: token expired", agent=agent_name, error=str(e))
                     tui_event_queue.put_nowait(f"🔑 [bold red]Auth Error:[/] Token for {agent_name} expired. Please refresh credentials.")
-                    logger.warning("MultiAgent: token expired", agent=agent_name, error=str(e))
                     return {"status": "error", "error": "token_expired", "action_required": "REFRESH_CREDENTIALS", "detail": str(e)}
                 
                 except InvalidCredentialsError as e:
+                    logger.warning("Step auth error: invalid credentials", agent=agent_name, error=str(e))
                     tui_event_queue.put_nowait(f"🚫 [bold red]Auth Error:[/] Invalid credentials for {agent_name}.")
-                    logger.warning("MultiAgent: invalid credentials", agent=agent_name, error=str(e))
                     return {"status": "error", "error": "invalid_credentials", "detail": str(e)}
 
                 except (TransientError, NetworkError, RateLimitError) as e:
@@ -207,8 +207,8 @@ class MultiAgentOrchestrator:
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2 * (attempt + 1)) # Backoff
                     else:
+                        logger.error("Step failed after retries", agent=agent_name, error=str(e))
                         tui_event_queue.put_nowait(f"⏳ [red]Step {i+1} failed after retries:[/] {agent_name} is currently unavailable.")
-                        # After 3 attempts, we can't do more
                 
                 except Exception as e:
                     logger.error("Step permanent failure", agent=agent_name, error=str(e), exc_info=True)
@@ -229,7 +229,6 @@ class MultiAgentOrchestrator:
                     return err_data
             
             if last_err:
-                tui_event_queue.put_nowait(f"❌ [red]Orchestration aborted at {agent_name}:[/] Failed after {max_retries} attempts.")
                 err_data = {
                     "status": "error",
                     "failed_step": i + 1,
@@ -246,7 +245,7 @@ class MultiAgentOrchestrator:
 
         # 5. Merge and Normalize Output
         final_summary = self._normalize_final_output(results, user_task)
-        
+        logger.info("Multi-agent task completed successfully", agents_involved=list(results.keys()))
         tui_event_queue.put_nowait(f"🏁 [bold green]Complex task synchronized successfully.[/]")
         
         final_res = {
@@ -268,32 +267,25 @@ class MultiAgentOrchestrator:
     def _generate_plan(self, task: str) -> List[Dict[str, Any]]:
         """
         Parses the natural language task into a plan of agent calls.
-        Detects connector names and splits by sequence keywords.
         """
         plan = []
-        # Support for: PERPLEXITY, CLAUDE, SLACK, OPENCLAW, MIROFISH
         known_agents = self.connector_registry.list_connectors()
-        
-        # Split into logical steps: "Step A, then Step B; finally Step C"
         steps = re.split(r"[,;] then | then | and then |; |finally ", task, flags=re.IGNORECASE)
         
         for step_text in steps:
             step_text = step_text.strip()
             if not step_text: continue
             
-            # Find which agent is mentioned or implied
             target_agent = None
             for agent in known_agents:
                 if agent.lower() in step_text.lower():
                     target_agent = agent
                     break
             
-            # Heuristic: If 'post' or 'send' without agent name, imply SLACK if available
             if not target_agent and ("post" in step_text.lower() or "send" in step_text.lower()):
                 if "SLACK" in known_agents:
                     target_agent = "SLACK"
             
-            # Heuristic: If 'search' or 'research' or 'find' imply PERPLEXITY
             if not target_agent and ("search" in step_text.lower() or "research" in step_text.lower()):
                 if "PERPLEXITY" in known_agents:
                     target_agent = "PERPLEXITY"
@@ -304,7 +296,6 @@ class MultiAgentOrchestrator:
                     "command": step_text
                 })
         
-        # If no explicit steps detected, try to find all agents mentioned anywhere
         if not plan:
             for agent in known_agents:
                 if agent.lower() in task.lower():
@@ -314,14 +305,12 @@ class MultiAgentOrchestrator:
 
     async def _verify_db_permissions(self, db: AsyncSession, user_id: str, agent_name: str, payload: Dict[str, Any]):
         """Checks both EAT scopes and database PermissionProfile."""
-        # 1. Check EAT first (Fast)
         try:
             self._verify_eat_scopes(payload, agent_name)
-            return # EAT is authoritative if it has the scope
+            return
         except HandoffAuthorizationError:
-            pass # Fallback to DB check
+            pass
             
-        # 2. Check DB Profile (Precise)
         try:
             stmt = select(PermissionProfile).where(PermissionProfile.user_id == uuid.UUID(user_id))
             res = await db.execute(stmt)
@@ -331,7 +320,6 @@ class MultiAgentOrchestrator:
                 raise HandoffAuthorizationError(f"No permission profile found for user {user_id}")
                 
             perms = profile.permissions or {}
-            # Allow if agent_name is in keys or '*' is in keys
             if "*" in perms or agent_name.upper() in [k.upper() for k in perms.keys()]:
                 return
                 
@@ -341,8 +329,7 @@ class MultiAgentOrchestrator:
 
     def _verify_eat_scopes(self, payload: Dict[str, Any], agent_name: str):
         allowed_tools = payload.get("allowed_tools", [])
-        scopes = payload.get("scopes", {}) # tool -> [scopes]
-        
+        scopes = payload.get("scopes", {})
         agent_key = agent_name.upper()
         
         if "*" in allowed_tools:
@@ -370,5 +357,5 @@ class MultiAgentOrchestrator:
             "full_report": full_text.strip(),
             "completion_status": "Success",
             "agents_involved": list(results.keys()),
-            "timestamp": asyncio.get_event_loop().time()
+            "timestamp": time.time()
         }

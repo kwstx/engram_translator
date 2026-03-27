@@ -1,11 +1,13 @@
 import abc
 import structlog
 import asyncio
+import time
 from typing import Any, Dict, Optional, List
-from app.core.metrics import record_translation_error, record_translation_success
+from app.core.metrics import record_translation_error, record_translation_success, record_connector_call
 from app.core.translator import TranslatorEngine
 from app.semantic.mapper import SemanticMapper
 from app.core.config import settings
+from app.core.logging import bind_context
 
 logger = structlog.get_logger(__name__)
 
@@ -40,14 +42,12 @@ class BaseConnector(abc.ABC):
     async def call_tool(self, tool_request: Dict[str, Any], db: Optional[Any] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Performs the actual API call to the tool.
-        If 'db' and 'user_id' are provided, the connector can retrieve the user's specific credentials.
         """
         pass
 
     async def get_active_token(self, db: Optional[Any], user_id: Optional[str], default_token: Optional[str] = None) -> Optional[str]:
         """
         Helper to retrieve the user's specific credential with automatic refresh support.
-        Falls back to the provided default token if no user-specific credential is found.
         """
         from uuid import UUID
         from app.services.credentials import CredentialService
@@ -56,10 +56,10 @@ class BaseConnector(abc.ABC):
             try:
                 token = await CredentialService.get_active_token(db, UUID(user_id), self.name.lower())
                 if token:
-                    logger.info("Connector: using active user token", connector=self.name, user_id=user_id)
+                    logger.info("Connector using user-specific token")
                     return token
             except Exception as e:
-                logger.warning("Connector: failed to retrieve user credentials", connector=self.name, error=str(e))
+                logger.warning("Connector: failed to retrieve user credentials", error=str(e))
         
         return default_token
 
@@ -67,7 +67,6 @@ class BaseConnector(abc.ABC):
         """
         Reconciles data schema using the SemanticMapper's DataSiloResolver.
         """
-        # Placeholder schemas for demonstration; in production, these would be loaded from a registry
         source_schema = {"type": "object", "properties": {}}
         target_schema = {"type": "object", "properties": {}}
         
@@ -80,7 +79,7 @@ class BaseConnector(abc.ABC):
                 target_protocol=target_protocol
             )
         except Exception as e:
-            logger.warning("Connector: schema reconciliation failed", connector=self.name, error=str(e))
+            logger.warning("Schema reconciliation failed", error=str(e))
             return data
 
     def handle_error(self, error: Exception) -> Dict[str, Any]:
@@ -90,13 +89,10 @@ class BaseConnector(abc.ABC):
         error_type = type(error).__name__
         detail = str(error).lower()
         
-        # Mapping common tool errors (extendable per connector)
-        # Attempt to extract status code from common library exception patterns
         status_code = getattr(error, "status_code", 500)
         if hasattr(error, "response") and hasattr(error.response, "status_code"):
             status_code = error.response.status_code
         
-        # Check for specific library-level timeouts
         is_timeout = "timeout" in detail or "timed out" in detail
         
         engram_code = "TOOL_EXECUTION_FAILURE"
@@ -131,21 +127,21 @@ class BaseConnector(abc.ABC):
             "action_required": action_required
         }
 
-
-
     async def execute(self, message: Dict[str, Any], message_protocol: str, db: Optional[Any] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         The main entry point for executing a task via the connector.
-        Supports single tasks and multi-step sequential workflows.
         """
+        bind_context(connector=self.name, user_id=user_id)
+        start_time = time.time()
+        
         # 1. Normalization
         normalized_task = message
         if message_protocol.upper() != "MCP":
             try:
                 normalized_task = self._translator.translate(message, message_protocol, "MCP")
-                logger.info("Connector: payload normalized", connector=self.name, source_p=message_protocol, to="MCP")
+                logger.info("Connector payload normalized", source_protocol=message_protocol)
             except Exception as e:
-                logger.warning("Connector: normalization failed, using raw message", connector=self.name, error=str(e))
+                logger.warning("Normalization failed, using raw message", error=str(e))
                 normalized_task = message
 
         try:
@@ -155,35 +151,40 @@ class BaseConnector(abc.ABC):
                 return await self._execute_workflow(workflow_steps, normalized_task, db, user_id)
 
             # 3. Standard single-step execution
-            # Reconcile schema before translating to tool
             reconciled_task = self.reconcile_schema(normalized_task, self.name.upper())
-            
             tool_request = self.translate_to_tool(reconciled_task)
-            logger.debug("Connector: translated to tool format", connector=self.name, request=tool_request)
+            logger.debug("Connector: translated request", request=tool_request)
 
             tool_response = await self.call_tool(tool_request, db, user_id)
-            logger.debug("Connector: received tool response", connector=self.name)
+            logger.debug("Connector: received response")
 
             final_response = self.translate_from_tool(tool_response)
             
+            duration = time.time() - start_time
             record_translation_success(f"connector_{self.name.lower()}", message_protocol, self.name.upper())
+            record_connector_call(self.name, user_id or "unknown", "success", duration)
+            
+            logger.info("Connector execution successful", duration=duration)
             return final_response
 
         except Exception as e:
-            logger.error("Connector: execution failed", connector=self.name, error=str(e))
+            duration = time.time() - start_time
+            logger.error("Connector execution failed", error=str(e), duration=duration)
             record_translation_error(f"connector_{self.name.lower()}", message_protocol, self.name.upper())
+            record_connector_call(self.name, user_id or "unknown", "error", duration)
             return self.handle_error(e)
 
     async def _execute_workflow(self, steps: List[Dict[str, Any]], context: Dict[str, Any], db: Optional[Any] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a sequence of steps, passing the output of one as context to the next.
         """
-        logger.info("Connector: starting multi-step workflow", connector=self.name, step_count=len(steps))
+        logger.info("Starting multi-step workflow", step_count=len(steps))
         current_context = context.copy()
         history = []
 
         for i, step in enumerate(steps):
-            logger.info("Connector: executing workflow step", connector=self.name, step=i+1, total=len(steps))
+            logger.info("Executing workflow step", step=i+1, total=len(steps))
+            step_start_time = time.time()
             
             # Merge context into step
             step_task = {**current_context, **step}
@@ -202,8 +203,9 @@ class BaseConnector(abc.ABC):
                     payload = step_final.get("payload", {})
                     current_context.update(payload)
                     history.append({"step": i+1, "status": "success", "result": step_final})
+                    logger.info("Workflow step successful", step=i+1)
                 else:
-                    logger.error("Connector: workflow step failed", connector=self.name, step=i+1)
+                    logger.error("Workflow step failed", step=i+1)
                     return {
                         "status": "error",
                         "connector": self.name,
@@ -212,6 +214,7 @@ class BaseConnector(abc.ABC):
                         "failed_step": step_final
                     }
             except Exception as e:
+                logger.error("Workflow step exception", step=i+1, error=str(e))
                 return self.handle_error(e)
 
         return {

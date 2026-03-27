@@ -46,8 +46,11 @@ def configure_logging(log_level: Optional[str] = None) -> None:
 
     from app.core.tui_bridge import tui_logger_processor
     structlog.configure(
-        processors=pre_chain
-        + [
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            timestamper,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             mask_sensitive_data,
@@ -58,4 +61,12 @@ def configure_logging(log_level: Optional[str] = None) -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
+
+def bind_context(**kwargs):
+    """Binds context variables to the current structlog context."""
+    structlog.contextvars.bind_contextvars(**kwargs)
+
+def unbind_context(*keys):
+    """Unbinds context variables from the current structlog context."""
+    structlog.contextvars.unbind_contextvars(*keys)
 
