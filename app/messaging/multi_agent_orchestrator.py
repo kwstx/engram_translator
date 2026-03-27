@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import re
+from datetime import datetime, timezone
 import structlog
 from typing import List, Dict, Any, Optional, Tuple
 from app.messaging.orchestrator import Orchestrator, HandoffResult
@@ -18,7 +19,8 @@ from app.core.security import verify_engram_token
 from app.messaging.connectors.registry import get_default_registry
 from bridge.memory import memory_backend
 from app.core.tui_bridge import tui_event_queue
-from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 from app.db.models import PermissionProfile
 
 logger = structlog.get_logger(__name__)
@@ -33,34 +35,61 @@ class MultiAgentOrchestrator:
         self.orchestrator = orchestrator or Orchestrator()
         self.connector_registry = get_default_registry()
 
-    async def execute_task(self, user_task: str, eat: str, db: Optional[Session] = None) -> Dict[str, Any]:
+    async def execute_task(
+        self, 
+        user_task: str, 
+        eat: str, 
+        db: Optional[AsyncSession] = None,
+        task_id: Optional[uuid.UUID] = None,
+        plan: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
         """
         Coordinates a complex task across multiple agents.
         
         1. Verifies the user's permissions via the EAT and DB profiles.
-        2. Parses the task into subtasks and determines required agents.
+        2. Parses the task into subtasks and determines required agents (unless plan provided).
         3. Routes each subtask to the relevant connector.
         4. Collects and merges responses into a normalized output.
         5. Handles retries and failures.
         """
+        from app.db.models import Task, TaskStatus # Local import to avoid cycles
+
         # 1. Verify EAT and extract user info
         try:
             auth_payload = verify_engram_token(eat)
             user_id = str(auth_payload.get("sub"))
-            logger.info("Multi-agent task initiated", user_id=user_id, task=user_task)
+            logger.info("Multi-agent task initiated", user_id=user_id, task=user_task, task_id=task_id)
         except Exception as e:
             logger.error("Authorization failed", error=str(e))
             raise HandoffAuthorizationError(f"Invalid or missing Engram Access Token (EAT): {str(e)}")
 
-        # 2. Parse Task into a Plan (Intent Detection & Planner)
-        plan = self._generate_plan(user_task)
+        # Update task status to RUNNING if task_id provided
+        db_task = None
+        if db and task_id:
+            stmt = select(Task).where(Task.id == task_id)
+            res = await db.execute(stmt)
+            db_task = res.scalars().first()
+            if db_task:
+                db_task.status = TaskStatus.RUNNING
+                db_task.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                await db.refresh(db_task)
+
+        # 2. Parse Task into a Plan (Intent Detection & Planner) or use provided plan
+        if not plan:
+            plan = self._generate_plan(user_task)
         
         if not plan:
             tui_event_queue.put_nowait(f"⚠️ [bold yellow]Planner:[/] Could not determine subtasks for '{user_task[:30]}...'")
-            return {
+            err_res = {
                 "status": "error", 
                 "message": "Task parser could not determine a multi-agent plan. Please name the agents (e.g., Claude, Perplexity, Slack) in your request."
             }
+            if db_task:
+                db_task.status = TaskStatus.DEAD_LETTER
+                db_task.last_error = err_res["message"]
+                await db.commit()
+            return err_res
 
         # 3. Inform TUI of the plan
         tui_event_queue.put_nowait(f"📋 [bold cyan]Orchestration Plan:[/] Split into {len(plan)} agent steps.")
@@ -149,6 +178,16 @@ class MultiAgentOrchestrator:
                     )
                     
                     tui_event_queue.put_nowait(f"✅ [green]Step {i+1} OK:[/] [bold]{agent_name}[/] finished.")
+                    
+                    # Update DB Task with partial result
+                    if db and db_task:
+                        if not db_task.results:
+                            db_task.results = {}
+                        db_task.results[agent_name] = step_result
+                        db_task.updated_at = datetime.now(timezone.utc)
+                        await db.commit()
+                        await db.refresh(db_task)
+
                     last_err = None
                     break # Success!
 
@@ -174,35 +213,57 @@ class MultiAgentOrchestrator:
                 except Exception as e:
                     logger.error("Step permanent failure", agent=agent_name, error=str(e), exc_info=True)
                     tui_event_queue.put_nowait(f"❌ [red]Orchestration aborted at {agent_name}:[/] Permanent error: {str(e)}")
-                    return {
+                    err_data = {
                         "status": "error",
                         "failed_step": i + 1,
                         "failed_agent": agent_name,
                         "error": str(e),
                         "partial_results": results
                     }
+                    if db and db_task:
+                        db_task.status = TaskStatus.DEAD_LETTER
+                        db_task.last_error = str(e)
+                        db_task.results = results
+                        db_task.updated_at = datetime.now(timezone.utc)
+                        await db.commit()
+                    return err_data
             
             if last_err:
                 tui_event_queue.put_nowait(f"❌ [red]Orchestration aborted at {agent_name}:[/] Failed after {max_retries} attempts.")
-                return {
+                err_data = {
                     "status": "error",
                     "failed_step": i + 1,
                     "failed_agent": agent_name,
                     "error": str(last_err),
                     "partial_results": results
                 }
+                if db and db_task:
+                    db_task.status = TaskStatus.DEAD_LETTER
+                    db_task.last_error = str(last_err)
+                    db_task.results = results
+                    await db.commit()
+                return err_data
 
         # 5. Merge and Normalize Output
         final_summary = self._normalize_final_output(results, user_task)
         
         tui_event_queue.put_nowait(f"🏁 [bold green]Complex task synchronized successfully.[/]")
         
-        return {
+        final_res = {
             "status": "success",
             "correlation_id": correlation_id,
             "results": results,
             "normalized_output": final_summary
         }
+
+        if db and db_task:
+            db_task.status = TaskStatus.COMPLETED
+            db_task.results = results
+            db_task.completed_at = datetime.now(timezone.utc)
+            db_task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        return final_res
 
     def _generate_plan(self, task: str) -> List[Dict[str, Any]]:
         """
@@ -251,7 +312,7 @@ class MultiAgentOrchestrator:
                     
         return plan
 
-    async def _verify_db_permissions(self, db: Session, user_id: str, agent_name: str, payload: Dict[str, Any]):
+    async def _verify_db_permissions(self, db: AsyncSession, user_id: str, agent_name: str, payload: Dict[str, Any]):
         """Checks both EAT scopes and database PermissionProfile."""
         # 1. Check EAT first (Fast)
         try:

@@ -14,12 +14,14 @@ class ProtocolType(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     PENDING = "PENDING"
     LEASED = "LEASED"
+    RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     DEAD_LETTER = "DEAD_LETTER"
 
 class AgentMessageStatus(str, enum.Enum):
     PENDING = "PENDING"
     LEASED = "LEASED"
+    RUNNING = "RUNNING"
     ACKED = "ACKED"
     DEAD_LETTER = "DEAD_LETTER"
 
@@ -115,8 +117,8 @@ class Task(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     source_protocol: str = Field(index=True, nullable=False)
     target_protocol: str = Field(index=True, nullable=False)
-    target_agent_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), index=True, nullable=False)
+    target_agent_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(UUID(as_uuid=True), index=True, nullable=True)
     )
     source_message: Dict[str, Any] = Field(
         sa_column=Column(JSONB, nullable=False)
@@ -141,6 +143,10 @@ class Task(SQLModel, table=True):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
+    )
+    results: Optional[Dict[str, Any]] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
     )
     completed_at: Optional[datetime] = Field(
         default=None,

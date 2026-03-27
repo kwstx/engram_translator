@@ -76,7 +76,27 @@ class TaskWorker:
         now = datetime.now(timezone.utc)
         try:
             await self._orchestrator.translator.refresh_delta_mappings(session)
-            # Use reliable routeTo instead of direct handoff
+            if task.target_protocol == "MULTI_AGENT":
+                logger.info("Executing multi-agent orchestration task", task_id=task.id)
+                from app.messaging.multi_agent_orchestrator import MultiAgentOrchestrator
+                multi_orch = MultiAgentOrchestrator(orchestrator=self._orchestrator)
+                
+                # Extract original command and plan if available
+                source_msg = task.source_message or {}
+                command = source_msg.get("command", "")
+                plan = source_msg.get("plan")
+                
+                # Execute multi-agent task (it handles status updates to RUNNING/COMPLETED/DEAD_LETTER internally)
+                await multi_orch.execute_task(
+                    user_task=command,
+                    eat=task.eat,
+                    db=session,
+                    task_id=task.id,
+                    plan=plan
+                )
+                return
+
+            # Legacy/Single-hop translation flow
             translated_message = await routeTo(
                 target=task.target_protocol,
                 payload=task.source_message,
