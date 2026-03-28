@@ -394,6 +394,17 @@ class EngramTUI(App):
         color: #ecf0f1;
     }
 
+    #task-panel {
+        border: solid #2c3e50;
+        padding: 1;
+        margin-bottom: 1;
+        background: #12151c;
+    }
+
+    #task-current, #task-progress, #task-connectors {
+        color: #ecf0f1;
+    }
+
     #input-area {
         height: 3;
         background: #1a1e26;
@@ -505,6 +516,12 @@ class EngramTUI(App):
         self.base_url: str = DEFAULT_BASE_URL
         self.user_email: Optional[str] = None
         self.connected_providers = set()
+        self.active_task_id: Optional[str] = None
+        self.active_task_text: Optional[str] = None
+        self.active_task_status: Optional[str] = None
+        self.active_task_steps: Dict[int, Dict[str, Any]] = {}
+        self.active_task_agents = set()
+        self.active_task_total_steps: Optional[int] = None
 
     def compose(self) -> ComposeResult:
         # Header with Logo
@@ -521,6 +538,15 @@ class EngramTUI(App):
                 yield Label("✅ [bold]FastAPI Engine:[/] [green]Online[/]", classes="stat-item")
                 yield Label("✅ [bold]Discovery Service:[/] [green]Active[/]", classes="stat-item")
                 yield Label("⚡ [bold]Task Worker:[/] [green]Processing[/]", classes="stat-item")
+
+                with Container(id="task-panel"):
+                    yield Label("TASK TRACKER", classes="sidebar-title")
+                    yield Label("CURRENT TASK", classes="sidebar-title")
+                    yield Static("No task submitted yet.", id="task-current")
+                    yield Label("PROGRESS", classes="sidebar-title")
+                    yield Static("Status: IDLE", id="task-progress")
+                    yield Label("ACTIVE CONNECTORS", classes="sidebar-title")
+                    yield Static("None", id="task-connectors")
                 
                 yield Label("\n🛰️ RECENT ACTIVITY", classes="sidebar-title")
                 yield Label("• A2A Protocol registered", classes="stat-item")
@@ -544,7 +570,7 @@ class EngramTUI(App):
                             yield Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn")
 
         # Input Area (Command prompt)
-        yield Input(placeholder="Type a command or press Enter to continue...", id="command-input")
+        yield Input(placeholder="Type a task or /command (e.g., 'Prepare a report from Slack then send to Notion')", id="command-input")
         
         # Footer
         yield Footer()
@@ -599,6 +625,115 @@ class EngramTUI(App):
         from datetime import datetime
         now = datetime.now().strftime("%H:%M:%S")
         log_view.write(f"[dim]{now}[/] {message}")
+        self._handle_task_event(message)
+
+    def _handle_task_event(self, message: str) -> None:
+        """Parse orchestration events and update the task tracker panel."""
+        import re
+
+        if "Orchestration Plan" in message and "Split into" in message:
+            match = re.search(r"Split into (\d+) agent steps", message)
+            if match:
+                self._set_task_total_steps(int(match.group(1)))
+                self._set_task_status("PLANNED")
+            return
+
+        if "Step" in message and "Handing off to" in message:
+            match = re.search(r"Step (\d+) \(Att (\d+)\):.*Handing off to \[bold\](.+?)\[/\]", message)
+            if match:
+                step_index = int(match.group(1))
+                agent_name = match.group(3)
+                self._update_step(step_index, agent_name, "RUNNING")
+                self._set_task_status("RUNNING")
+            return
+
+        if "Step" in message and "OK" in message:
+            match = re.search(r"Step (\d+) OK:.*\[bold\](.+?)\[/\]", message)
+            if match:
+                step_index = int(match.group(1))
+                agent_name = match.group(2)
+                self._update_step(step_index, agent_name, "COMPLETED")
+            return
+
+        if "failed after retries" in message:
+            match = re.search(r"Step (\d+) failed after retries:.*", message)
+            if match:
+                step_index = int(match.group(1))
+                self._update_step(step_index, None, "FAILED")
+                self._set_task_status("FAILED")
+            return
+
+        if "Orchestration aborted" in message or "Planner:" in message:
+            self._set_task_status("FAILED")
+            return
+
+        if "Complex task synchronized successfully" in message:
+            self._set_task_status("COMPLETED")
+            return
+
+    def _reset_task_tracker(self, task_text: str, task_id: Optional[str]) -> None:
+        self.active_task_text = task_text
+        self.active_task_id = task_id
+        self.active_task_status = "SUBMITTED"
+        self.active_task_steps = {}
+        self.active_task_agents = set()
+        self.active_task_total_steps = None
+        self._render_task_tracker()
+
+    def _set_task_status(self, status: str) -> None:
+        self.active_task_status = status
+        self._render_task_tracker()
+
+    def _set_task_total_steps(self, total_steps: int) -> None:
+        self.active_task_total_steps = total_steps
+        for i in range(1, total_steps + 1):
+            self.active_task_steps.setdefault(i, {"agent": None, "status": "PENDING"})
+        self._render_task_tracker()
+
+    def _update_step(self, step_index: int, agent_name: Optional[str], status: str) -> None:
+        step = self.active_task_steps.get(step_index, {"agent": None, "status": "PENDING"})
+        if agent_name:
+            step["agent"] = agent_name
+            self.active_task_agents.add(agent_name)
+        step["status"] = status
+        self.active_task_steps[step_index] = step
+        self._render_task_tracker()
+
+    def _render_task_tracker(self) -> None:
+        try:
+            task_current = self.query_one("#task-current", Static)
+            task_progress = self.query_one("#task-progress", Static)
+            task_connectors = self.query_one("#task-connectors", Static)
+        except Exception:
+            return
+
+        task_text = self.active_task_text or "No task submitted yet."
+        task_current.update(task_text)
+
+        status_line = f"Status: {self.active_task_status or 'IDLE'}"
+        if self.active_task_id:
+            status_line += f"\nTask ID: {self.active_task_id}"
+
+        steps_lines = []
+        if self.active_task_steps:
+            for idx in sorted(self.active_task_steps.keys()):
+                step = self.active_task_steps[idx]
+                agent = step.get("agent") or "TBD"
+                step_status = step.get("status") or "PENDING"
+                steps_lines.append(f"{idx}. {agent} - {step_status}")
+        elif self.active_task_total_steps:
+            steps_lines.append(f"Steps: {self.active_task_total_steps} (awaiting plan)")
+
+        progress_text = status_line
+        if steps_lines:
+            progress_text += "\n" + "\n".join(steps_lines)
+        task_progress.update(progress_text)
+
+        if self.active_task_agents:
+            task_connectors.update(", ".join(sorted(self.active_task_agents)))
+        else:
+            task_connectors.update("None")
+
 
     @on(Input.Submitted)
     def handle_command(self, event: Input.Submitted) -> None:
@@ -745,6 +880,8 @@ class EngramTUI(App):
             log_view.write("[bold red]Auth required:[/] Please login to continue.")
             return
 
+        self._reset_task_tracker(command, None)
+
         request_body = {
             "command": command,
             "metadata": {
@@ -770,6 +907,8 @@ class EngramTUI(App):
         payload = response.json()
         task_id = payload.get("task_id")
         log_view.write(f"[bold green]Task accepted:[/] {task_id}")
+        self._reset_task_tracker(command, str(task_id))
+
 
         last_status = None
         while True:
@@ -790,6 +929,7 @@ class EngramTUI(App):
             if status != last_status:
                 last_status = status
                 log_view.write(f"[dim]Status:[/] {status}")
+                self._set_task_status(status)
             if status in ("COMPLETED", "DEAD_LETTER"):
                 if task_status.get("last_error"):
                     log_view.write(f"[bold red]Last Error:[/] {task_status['last_error']}")
