@@ -44,7 +44,13 @@ async def submit_multi_agent_task(
     Submits a complex natural language task for multi-agent execution.
     Verifies the EAT, parses the task into a plan, and enqueues it.
     """
-    user_id = str(principal.get("sub"))
+    user_sub = principal.get("sub")
+    if not user_sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Subject missing in token."
+        )
+    user_id = str(user_sub)
     bind_context(user_id=user_id)
     
     eat = principal.get("_raw_token")
@@ -75,7 +81,16 @@ async def submit_multi_agent_task(
         )
 
     # 3. Create the Task record
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user identifier in token."
+        )
+
     task = Task(
+        user_id=user_uuid,
         source_protocol="NL",
         target_protocol="MULTI_AGENT",
         source_message={
@@ -111,7 +126,15 @@ async def get_task_status(
     bind_context(user_id=str(principal.get("sub")), task_id=str(task_id))
     logger.debug("Polling task status")
     
-    stmt = select(Task).where(Task.id == task_id)
+    user_sub = principal.get("sub")
+    if not user_sub:
+        raise HTTPException(status_code=401, detail="Subject missing in token.")
+    try:
+        user_uuid = uuid.UUID(str(user_sub))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user identifier in token.")
+
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_uuid)
     res = await db.execute(stmt)
     task = res.scalars().first()
     
@@ -129,7 +152,21 @@ async def list_tasks(
     """
     Lists recent tasks for the authenticated user.
     """
-    # Filtering by user_id would require extraction from EAT
-    stmt = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    user_sub = principal.get("sub")
+    if not user_sub:
+        raise HTTPException(status_code=401, detail="Subject missing in token.")
+    try:
+        user_uuid = uuid.UUID(str(user_sub))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user identifier in token.")
+
+    stmt = (
+        select(Task)
+        .where(Task.user_id == user_uuid)
+        .order_by(Task.created_at.desc())
+        .limit(limit)
+    )
     res = await db.execute(stmt)
-    return res.scalars().all()
+    tasks = res.scalars().all()
+    # Defensive filter in case legacy rows lack user_id
+    return [task for task in tasks if task.user_id == user_uuid]

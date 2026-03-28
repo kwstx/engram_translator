@@ -482,7 +482,16 @@ async def enqueue_task(
     db: Session = Depends(get_session),
     principal: Dict[str, Any] = require_scopes(["translate:a2a"]),
 ):
+    user_sub = principal.get("sub")
+    if not user_sub:
+        raise HTTPException(status_code=401, detail="Subject missing in token.")
+    try:
+        user_uuid = UUID(str(user_sub))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user identifier in token.")
+
     task = Task(
+        user_id=user_uuid,
         source_message=request.source_message,
         source_protocol=request.source_protocol,
         target_protocol=request.target_protocol,

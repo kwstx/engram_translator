@@ -18,8 +18,11 @@ from datetime import timedelta
 from app.services.session import SessionService
 from pydantic import BaseModel, EmailStr
 from fastapi import Request
+import structlog
+from app.core.logging import bind_context
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -43,6 +46,7 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_session)):
     result = await db.execute(statement)
     user = result.scalars().first()
     if user:
+        logger.warning("Signup failed: user already exists", email=user_in.email)
         raise HTTPException(
             status_code=400,
             detail="The user with this email already exists in the system.",
@@ -71,6 +75,8 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_session)):
 
     await db.commit()
     await db.refresh(db_obj)
+    bind_context(user_id=str(db_obj.id))
+    logger.info("Signup successful", user_id=str(db_obj.id))
     return db_obj
 
 @router.post("/login", response_model=Token)
@@ -84,12 +90,14 @@ async def login(
     result = await db.execute(statement)
     user = result.scalars().first()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        logger.warning("Login failed: invalid credentials", email=form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     elif not user.is_active:
+        logger.warning("Login failed: inactive user", user_id=str(user.id), email=user.email)
         raise HTTPException(status_code=400, detail="Inactive user")
     
     # Create persistent session metadata
@@ -100,6 +108,8 @@ async def login(
             "ip_address": request.client.host if request.client else "unknown"
         }
     )
+    bind_context(user_id=str(user.id), session_id=session_id)
+    logger.info("Login successful", user_id=str(user.id), session_id=session_id)
     
     # Create access token including session ID
     access_token = create_access_token(
@@ -110,6 +120,7 @@ async def login(
             "scope": "translate:a2a"
         }
     )
+    logger.info("Access token issued", user_id=str(user.id), scope="translate:a2a")
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/logout")
@@ -126,7 +137,8 @@ async def logout(principal: Dict[str, Any] = Depends(get_current_principal)):
         import time
         expires_in = max(1, exp - int(time.time()))
         revoke_token(jti, expires_in)
-        
+    bind_context(user_id=str(principal.get("sub")), session_id=session_id)
+    logger.info("Logout successful", user_id=str(principal.get("sub")), session_id=session_id, token_revoked=bool(jti and exp))
     return {"detail": "Successfully logged out"}
 
 @router.get("/sessions")
@@ -167,7 +179,8 @@ async def generate_eat(
         permissions=profile.permissions,
         expires_delta=timedelta(days=expires_days)
     )
-    
+    bind_context(user_id=str(user_id))
+    logger.info("EAT generated", user_id=str(user_id), expires_days=expires_days)
     return {"eat": eat, "token_type": "bearer"}
 @router.post("/tokens/revoke-eat")
 async def revoke_eat(
@@ -205,5 +218,6 @@ async def revoke_eat(
         import time
         expires_in = max(1, exp - int(time.time()))
         revoke_token(jti, expires_in)
-        
+    bind_context(user_id=str(principal.get("sub")))
+    logger.info("EAT revoked", user_id=str(principal.get("sub")), jti=jti)
     return {"detail": "Token successfully revoked"}

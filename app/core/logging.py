@@ -8,16 +8,30 @@ from app.core.config import settings
 
 SENSITIVE_KEYS = {"token", "password", "key", "secret", "authorization", "cookie", "jwt", "auth"}
 
-def mask_sensitive_data(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Masks values of sensitive keys in the log event."""
-    for key in event_dict:
-        if any(sk in key.lower() for sk in SENSITIVE_KEYS):
-            val = event_dict[key]
-            if isinstance(val, str) and len(val) > 8:
-                event_dict[key] = f"{val[:4]}...{val[-4:]}"
+def _mask_value(val: Any) -> Any:
+    if isinstance(val, str) and len(val) > 8:
+        return f"{val[:4]}...{val[-4:]}"
+    return "********"
+
+
+def _sanitize(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, value in obj.items():
+            key_str = str(key)
+            if any(sk in key_str.lower() for sk in SENSITIVE_KEYS):
+                sanitized[key] = _mask_value(value)
             else:
-                event_dict[key] = "********"
-    return event_dict
+                sanitized[key] = _sanitize(value)
+        return sanitized
+    if isinstance(obj, list):
+        return [_sanitize(item) for item in obj]
+    return obj
+
+
+def mask_sensitive_data(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Masks values of sensitive keys in the log event (including nested structures)."""
+    return _sanitize(event_dict)
 
 def configure_logging(log_level: Optional[str] = None) -> None:
     """Configure structured JSON logging via structlog."""
@@ -69,4 +83,3 @@ def bind_context(**kwargs):
 def unbind_context(*keys):
     """Unbinds context variables from the current structlog context."""
     structlog.contextvars.unbind_contextvars(*keys)
-

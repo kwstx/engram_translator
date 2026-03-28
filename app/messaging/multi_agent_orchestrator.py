@@ -19,7 +19,7 @@ from app.core.exceptions import (
 from app.core.security import verify_engram_token
 from app.messaging.connectors.registry import get_default_registry
 from bridge.memory import memory_backend
-from app.core.tui_bridge import tui_event_queue
+from app.core.tui_bridge import get_tui_event_queue
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.db.models import PermissionProfile
@@ -80,7 +80,7 @@ class MultiAgentOrchestrator:
         
         if not plan:
             logger.warning("Planner failed to generate plan")
-            tui_event_queue.put_nowait(f"⚠️ [bold yellow]Planner:[/] Could not determine subtasks for '{user_task[:30]}...'")
+            get_tui_event_queue().put_nowait(f"⚠️ [bold yellow]Planner:[/] Could not determine subtasks for '{user_task[:30]}...'")
             err_res = {
                 "status": "error", 
                 "message": "Task parser could not determine a multi-agent plan. Please name the agents (e.g., Claude, Perplexity, Slack) in your request."
@@ -92,7 +92,7 @@ class MultiAgentOrchestrator:
             return err_res
 
         logger.info("Orchestration plan generated", step_count=len(plan))
-        tui_event_queue.put_nowait(f"📋 [bold cyan]Orchestration Plan:[/] Split into {len(plan)} agent steps.")
+        get_tui_event_queue().put_nowait(f"📋 [bold cyan]Orchestration Plan:[/] Split into {len(plan)} agent steps.")
 
         results = {}
         context = {"original_task": user_task}
@@ -115,7 +115,7 @@ class MultiAgentOrchestrator:
             last_err = None
             for attempt in range(max_retries):
                 logger.info("Executing step", step_index=i+1, agent=agent_name, attempt=attempt+1)
-                tui_event_queue.put_nowait(f"🔄 [yellow]Step {i+1} (Att {attempt+1}):[/] Handing off to [bold]{agent_name}[/]")
+                get_tui_event_queue().put_nowait(f"🔄 [yellow]Step {i+1} (Att {attempt+1}):[/] Handing off to [bold]{agent_name}[/]")
                 step_start_time = time.time()
                 try:
                     # Permission check
@@ -178,7 +178,7 @@ class MultiAgentOrchestrator:
                     )
                     
                     logger.info("Step completed", step_index=i+1, agent=agent_name)
-                    tui_event_queue.put_nowait(f"✅ [green]Step {i+1} OK:[/] [bold]{agent_name}[/] finished.")
+                    get_tui_event_queue().put_nowait(f"✅ [green]Step {i+1} OK:[/] [bold]{agent_name}[/] finished.")
                     
                     if db and db_task:
                         if not db_task.results:
@@ -193,12 +193,12 @@ class MultiAgentOrchestrator:
 
                 except ExpiredTokenError as e:
                     logger.warning("Step auth error: token expired", agent=agent_name, error=str(e))
-                    tui_event_queue.put_nowait(f"🔑 [bold red]Auth Error:[/] Token for {agent_name} expired. Please refresh credentials.")
+                    get_tui_event_queue().put_nowait(f"🔑 [bold red]Auth Error:[/] Token for {agent_name} expired. Please refresh credentials.")
                     return {"status": "error", "error": "token_expired", "action_required": "REFRESH_CREDENTIALS", "detail": str(e)}
                 
                 except InvalidCredentialsError as e:
                     logger.warning("Step auth error: invalid credentials", agent=agent_name, error=str(e))
-                    tui_event_queue.put_nowait(f"🚫 [bold red]Auth Error:[/] Invalid credentials for {agent_name}.")
+                    get_tui_event_queue().put_nowait(f"🚫 [bold red]Auth Error:[/] Invalid credentials for {agent_name}.")
                     return {"status": "error", "error": "invalid_credentials", "detail": str(e)}
 
                 except (TransientError, NetworkError, RateLimitError) as e:
@@ -208,11 +208,11 @@ class MultiAgentOrchestrator:
                         await asyncio.sleep(2 * (attempt + 1)) # Backoff
                     else:
                         logger.error("Step failed after retries", agent=agent_name, error=str(e))
-                        tui_event_queue.put_nowait(f"⏳ [red]Step {i+1} failed after retries:[/] {agent_name} is currently unavailable.")
+                        get_tui_event_queue().put_nowait(f"⏳ [red]Step {i+1} failed after retries:[/] {agent_name} is currently unavailable.")
                 
                 except Exception as e:
                     logger.error("Step permanent failure", agent=agent_name, error=str(e), exc_info=True)
-                    tui_event_queue.put_nowait(f"❌ [red]Orchestration aborted at {agent_name}:[/] Permanent error: {str(e)}")
+                    get_tui_event_queue().put_nowait(f"❌ [red]Orchestration aborted at {agent_name}:[/] Permanent error: {str(e)}")
                     err_data = {
                         "status": "error",
                         "failed_step": i + 1,
@@ -246,7 +246,7 @@ class MultiAgentOrchestrator:
         # 5. Merge and Normalize Output
         final_summary = self._normalize_final_output(results, user_task)
         logger.info("Multi-agent task completed successfully", agents_involved=list(results.keys()))
-        tui_event_queue.put_nowait(f"🏁 [bold green]Complex task synchronized successfully.[/]")
+        get_tui_event_queue().put_nowait(f"🏁 [bold green]Complex task synchronized successfully.[/]")
         
         final_res = {
             "status": "success",

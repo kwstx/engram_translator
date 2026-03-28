@@ -115,6 +115,10 @@ class Task(SQLModel, table=True):
     __tablename__ = "tasks"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=True)
+    )
     source_protocol: str = Field(index=True, nullable=False)
     target_protocol: str = Field(index=True, nullable=False)
     target_agent_id: Optional[uuid.UUID] = Field(
