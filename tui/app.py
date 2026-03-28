@@ -19,53 +19,45 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/api/v1"
 
-PROVIDERS = [
-    {
-        "id": "claude",
-        "name": "Claude",
-        "auth": "api_key",
-        "hint": "Anthropic API key",
-        "aliases": ["claude", "anthropic"],
-    },
-    {
-        "id": "perplexity",
-        "name": "Perplexity",
-        "auth": "api_key",
-        "hint": "Perplexity API key",
-        "aliases": ["perplexity", "pplx"],
-    },
-    {
-        "id": "slack",
-        "name": "Slack",
-        "auth": "oauth",
-        "hint": "Slack OAuth token",
-        "aliases": ["slack"],
-    },
-    {
-        "id": "custom",
-        "name": "Other Tools",
-        "auth": "api_key",
-        "hint": "Any provider API key or OAuth token",
-        "custom": True,
-    },
-]
+# We'll fetch the real provider list from the backend on startup
+# to ensure the TUI is always in sync with the backend's capabilities.
+PROVIDERS = []
+PROVIDER_MAP = {}
 
-PROVIDER_MAP = {provider["id"]: provider for provider in PROVIDERS}
-
-def _infer_required_providers(command: str) -> list:
-    text = command.lower()
-    required = {}
-    for provider in PROVIDERS:
-        aliases = provider.get("aliases") or [provider["id"], provider.get("name", "").lower()]
-        if any(alias in text for alias in aliases):
-            required[provider["id"]] = provider
-
-    if ("post" in text or "send" in text) and "slack" in PROVIDER_MAP:
-        required["slack"] = PROVIDER_MAP["slack"]
-    if ("search" in text or "research" in text) and "perplexity" in PROVIDER_MAP:
-        required["perplexity"] = PROVIDER_MAP["perplexity"]
-
-    return list(required.values())
+async def _infer_required_providers_via_backend(base_url: str, eat: str, command: str) -> list:
+    """
+    Asks the backend to determine which tools are needed for a command.
+    Maintains the rule that 'execution workflows' are managed by the backend.
+    """
+    try:
+        # We use a dedicated analysis endpoint that doesn't trigger execution
+        headers = {"Authorization": f"Bearer {eat}"}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # We use the existing /tasks/submit endpoint's planner but with a 'dry_run' or similar param
+            # Or if that's not available, use the/discovery endpoint to list potential agents.
+            # For now, we perform a lightweight fetch from /credentials/providers to know what's possible
+            # and let the backend's main orchestration loop catch missing creds if we skip the proactive check.
+            response = await client.get(f"{base_url}/credentials/providers", headers=headers)
+            if response.status_code != 200:
+                return []
+            
+            all_possible = response.json()
+            command_lower = command.lower()
+            required = []
+            
+            # Simple keyword matching for UX (the backend still enforces this during execution)
+            for p in all_possible:
+                aliases = p.get("aliases") or [p["id"], p.get("name", "").lower()]
+                if any(alias in command_lower for alias in aliases):
+                    required.append(p)
+                elif p["id"] == "slack" and ("post" in command_lower or "send" in command_lower):
+                    required.append(p)
+                elif p["id"] == "perplexity" and ("search" in command_lower or "research" in command_lower):
+                    required.append(p)
+                    
+            return required
+    except Exception:
+        return []
 
 def _ensure_key() -> bytes:
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -1050,11 +1042,7 @@ class EngramTUI(App):
 
                 with Container(id="services-panel"):
                     yield Label("CONNECTED SERVICES", classes="sidebar-title")
-                    for provider in PROVIDERS:
-                        with Horizontal(classes="service-row"):
-                            yield Label(provider["name"], id=f"service-name-{provider['id']}", classes="service-name")
-                            yield Label("Not connected", id=f"service-status-{provider['id']}", classes="service-status status-waiting")
-                            yield Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn")
+                    # Services will be dynamically populated in on_mount
 
         # Input Area (Command prompt)
         yield Input(placeholder="Type a task or /command (e.g., 'Prepare a report from Slack then send to Notion')", id="command-input")
@@ -1081,7 +1069,9 @@ class EngramTUI(App):
         
         # Start background listener
         self.message_receiver()
-        self.run_worker(self.refresh_connected_services(), thread=False)
+        
+        # Initial discovery
+        self.run_worker(self.refresh_available_providers(), thread=False)
 
     @work(exclusive=True, thread=True)
     def message_receiver(self):
@@ -1118,6 +1108,16 @@ class EngramTUI(App):
             self._route_trace_event(message)
             self._route_translation_event(message)
         log_view.write(f"[dim]{now}[/] {display}")
+        
+        # PROMPT: Reaction to orchestration auth errors
+        if isinstance(message, dict) and message.get("type") == "agent.step.auth_error":
+            # Extract provider from message if possible
+            data = message.get("data", {})
+            provider_id = data.get("agent", "").lower()
+            if provider_id:
+                # We show a focused connect prompt
+                self.call_from_thread(self._handle_async_auth_error, provider_id)
+
         if isinstance(display, str):
             self._handle_task_event(display)
 
@@ -1522,7 +1522,11 @@ class EngramTUI(App):
         return True
 
     async def _ensure_required_providers_connected(self, command: str, log_view: RichLog) -> bool:
-        required = _infer_required_providers(command)
+        eat = await self._ensure_eat()
+        if not eat:
+            return False
+            
+        required = await _infer_required_providers_via_backend(self.base_url, eat, command)
         if not required:
             return True
 
@@ -1646,24 +1650,59 @@ class EngramTUI(App):
         for row in rows:
             log_view.write(f"{row.get('id')} | {row.get('status')} | {row.get('updated_at')}")
 
-    def _set_service_status(self, provider_id: str, status: str, connected: bool) -> None:
-        label = self.query_one(f"#service-status-{provider_id}", Label)
-        label.update(status)
-        label.remove_class("status-ok")
-        label.remove_class("status-waiting")
-        label.remove_class("status-error")
-        if connected:
-            label.add_class("status-ok")
-        else:
-            label.add_class("status-waiting")
+    async def refresh_available_providers(self) -> None:
+        """Fetches the list of supported providers from the backend and updates the UI."""
+        global PROVIDERS, PROVIDER_MAP
+        response = await self._authed_request("GET", "/credentials/providers")
+        if response.status_code == 200:
+            PROVIDERS = response.json()
+            PROVIDER_MAP = {p["id"]: p for p in PROVIDERS}
+            
+            # Rebuild the services panel
+            panel = self.query_one("#services-panel", Container)
+            # Remove existing dynamic rows (keep the title)
+            for child in panel.children[1:]:
+                child.remove()
+            
+            for provider in PROVIDERS:
+                row = Horizontal(classes="service-row")
+                row.mount(Label(provider["name"], id=f"service-name-{provider['id']}", classes="service-name"))
+                row.mount(Label("Checking...", id=f"service-status-{provider['id']}", classes="service-status status-waiting"))
+                row.mount(Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn"))
+                panel.mount(row)
+            
+            await self.refresh_connected_services()
 
-        button = self.query_one(f"#service-connect-{provider_id}", Button)
-        if provider_id == "custom":
-            button.disabled = False
-            button.label = "Add"
-        else:
-            button.disabled = connected
-            button.label = "Connected" if connected else "Connect"
+    def _set_service_status(self, provider_id: str, status: str, connected: bool) -> None:
+        try:
+            label = self.query_one(f"#service-status-{provider_id}", Label)
+            label.update(status)
+            label.remove_class("status-ok")
+            label.remove_class("status-waiting")
+            label.remove_class("status-error")
+            if connected:
+                label.add_class("status-ok")
+            else:
+                label.add_class("status-waiting")
+
+            button = self.query_one(f"#service-connect-{provider_id}", Button)
+            if provider_id == "custom":
+                button.disabled = False
+                button.label = "Add"
+            else:
+                button.disabled = connected
+                button.label = "Connected" if connected else "Connect"
+        except Exception:
+            pass # Panel might not be fully mounted or refreshed yet
+
+    async def _handle_async_auth_error(self, provider_id: str):
+        """Handle auth errors emitted by the backend background worker."""
+        provider = PROVIDER_MAP.get(provider_id)
+        if provider:
+            log_view = self.query_one("#log-view", RichLog)
+            log_view.write(f"[bold yellow]Triggering re-authentication for {provider['name']}...[/]")
+            await self._prompt_connect_provider(provider)
+            await self.refresh_connected_services(show_log=True)
 
     async def refresh_connected_services(self, show_log: bool = False) -> None:
         log_view = self.query_one("#log-view", RichLog)

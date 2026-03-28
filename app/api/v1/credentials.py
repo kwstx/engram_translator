@@ -30,6 +30,23 @@ class CredentialResponse(BaseModel):
     expires_at: Optional[datetime] = None
     # We do NOT return the token for security reasons
 
+class ProviderMetadataResponse(BaseModel):
+    id: str
+    name: str
+    auth: str
+    hint: str
+    aliases: Optional[List[str]] = None
+    custom: bool = False
+
+@router.get("/providers", response_model=List[ProviderMetadataResponse])
+async def list_supported_providers():
+    """
+    Returns a list of supported tool providers and their authentication requirements.
+    This metadata is used by the TUI to dynamically build connection screens.
+    """
+    # Use the static method we'll add to CredentialService
+    return CredentialService.get_supported_providers()
+
 @router.post("/", response_model=CredentialResponse)
 async def save_credential(
     request: CredentialSaveRequest,

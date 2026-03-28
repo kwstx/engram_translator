@@ -4,12 +4,96 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.db.models import ProviderCredential, CredentialType
+from app.core.crypto import CryptoService
 import structlog
 from app.core.logging import bind_context
 
 logger = structlog.get_logger(__name__)
 
+
 class CredentialService:
+    @staticmethod
+    def get_supported_providers() -> List[Dict[str, Any]]:
+        """
+        Returns metadata for all tool connectors currently registered in the backend.
+        This provides the source of truth for the CLI/TUI service discovery.
+        """
+        from app.messaging.connectors.registry import get_default_registry
+        registry = get_default_registry()
+        connectors = registry.list_connectors()
+        
+        # Metadata map reflecting the capabilities and auth requirements of backend connectors
+        provider_metadata = {
+            "CLAUDE": {
+                "id": "claude", 
+                "name": "Claude", 
+                "auth": "api_key", 
+                "hint": "Anthropic API key", 
+                "aliases": ["claude", "anthropic"]
+            },
+            "PERPLEXITY": {
+                "id": "perplexity", 
+                "name": "Perplexity", 
+                "auth": "api_key", 
+                "hint": "Perplexity API key", 
+                "aliases": ["perplexity", "pplx"]
+            },
+            "SLACK": {
+                "id": "slack", 
+                "name": "Slack", 
+                "auth": "oauth", 
+                "hint": "Slack OAuth token", 
+                "aliases": ["slack"]
+            },
+            "OPENCLAW": {
+                "id": "openclaw", 
+                "name": "OpenClaw", 
+                "auth": "api_key", 
+                "hint": "OpenClaw API key", 
+                "aliases": ["openclaw"]
+            },
+            "MIROFISH": {
+                "id": "mirofish", 
+                "name": "MiroFish", 
+                "auth": "api_key", 
+                "hint": "MiroFish API key", 
+                "aliases": ["mirofish"]
+            },
+            "HYPOTHETICAL": {
+                "id": "hypothetical", 
+                "name": "Hypothetical", 
+                "auth": "api_key", 
+                "hint": "Hypothetical API key", 
+                "aliases": ["hypothetical"]
+            },
+        }
+        
+        results = []
+        for name in connectors:
+            meta = provider_metadata.get(name.upper())
+            if not meta:
+                # Generic fallback for third-party or custom connectors
+                meta = {
+                    "id": name.lower(), 
+                    "name": name.replace("_", " ").title(), 
+                    "auth": "api_key", 
+                    "hint": f"{name} authorization token",
+                    "aliases": [name.lower()]
+                }
+            results.append(meta)
+            
+        # Ensure 'custom' is always available for manual token entry
+        if not any(r["id"] == "custom" for r in results):
+            results.append({
+                "id": "custom",
+                "name": "Other Tools",
+                "auth": "api_key",
+                "hint": "Any provider API key or OAuth token",
+                "custom": True,
+            })
+            
+        return results
+
     @staticmethod
     async def get_credentials(db: AsyncSession, user_id: UUID) -> List[ProviderCredential]:
         bind_context(user_id=str(user_id))
