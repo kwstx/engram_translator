@@ -277,8 +277,10 @@ class MultiAgentOrchestrator:
             if not step_text: continue
             
             target_agent = None
+            # Ignore agent names inside {tags} when selecting the target agent for the current step
+            clean_step_text = re.sub(r'\{.*?\}', '', step_text.lower())
             for agent in known_agents:
-                if agent.lower() in step_text.lower():
+                if agent.lower() in clean_step_text:
                     target_agent = agent
                     break
             
