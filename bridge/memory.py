@@ -1,15 +1,4 @@
-try:
-    from pyswip import Prolog
-except (ImportError, OSError):
-    # Fallback for environments without SWI-Prolog
-    class Prolog:
-        def consult(self, *args, **kwargs): pass
-        def query(self, *args, **kwargs): return []
-        def assertz(self, *args, **kwargs): pass
-        def retract(self, *args, **kwargs): pass
-
-from owlready2 import get_ontology, World
-from pyDatalog import pyDatalog
+import sqlite3
 import os
 import structlog
 from fastapi import APIRouter, HTTPException, Query
@@ -19,19 +8,28 @@ from datetime import datetime, timezone
 import json
 from app.semantic.mapper import SemanticMapper
 from app.core.config import settings
-
 import sys
+
 try:
-    from unittest.mock import MagicMock
-except ImportError:
-    MagicMock = None
+    from pyswip import Prolog
+except (ImportError, OSError):
+    class Prolog:
+        def consult(self, *args, **kwargs): pass
+        def query(self, *args, **kwargs): return []
+        def assertz(self, *args, **kwargs): pass
+        def retract(self, *args, **kwargs): pass
+
+try:
+    from pyDatalog import pyDatalog
+    pyDatalog.create_terms('A, X, Y, Z, A2, Y2, Z2, latest_fact, fact_data')
+except Exception:
+    A = X = Y = Z = A2 = Y2 = Z2 = latest_fact = fact_data = None
 
 logger = structlog.get_logger(__name__)
-
 router = APIRouter(tags=["Memory"])
 
-# ~/.engram/memory.db (Persistence for Prolog facts)
-DB_PATH = os.path.expanduser("~/.engram/memory.db")
+# ~/.engram/swarm_memory.db (Persistence for facts)
+DB_PATH = os.path.expanduser("~/.engram/swarm_memory.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 class MemoryWriteRequest(BaseModel):
@@ -45,101 +43,107 @@ class MemoryQueryResponse(BaseModel):
     agent_id: str
     timestamp: float
 
-try:
-    pyDatalog.create_terms('A, X, Y, Z, A2, Y2, Z2, latest_fact, fact_data')
-except Exception:
-    # Handle mock environment
-    A = X = Y = Z = A2 = Y2 = Z2 = latest_fact = fact_data = MagicMock() if "unittest.mock" in sys.modules else None
-
 class SwarmMemory:
     def __init__(self):
         self.prolog = Prolog()
+        
+        # Setup SQLite for persistence
+        self._init_db()
         
         # Load existing ontology
         ontology_folder = os.path.join(os.getcwd(), "app/semantic")
         ontology_file = os.path.join(ontology_folder, "protocols.owl")
         self.mapper = SemanticMapper(ontology_file)
         
-        # Load existing facts if db exists
-        if os.path.exists(DB_PATH):
-            self.load_memory()
+        # Load existing facts from SQLite into Prolog
+        self.load_memory()
         
         try:
             # Define conflict resolution rules in pyDatalog
+            # latest_fact(Key, Value, Agent, Timestamp)
             (latest_fact(X, Y, A, Z) <= 
                 fact_data(A, X, Y, Z) & 
                 ~ (fact_data(A2, X, Y2, Z2) & (Z2 > Z)))
         except Exception:
-            logger.warning("pyDatalog resolution rules not loaded (likely mock environment)")
+            logger.warning("pyDatalog resolution rules not loaded")
+
+    def _init_db(self):
+        """Initializes the SQLite database for fact persistence."""
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT,
+                    predicate TEXT,
+                    value TEXT,
+                    timestamp REAL,
+                    protocol TEXT
+                )
+            """)
+            conn.commit()
 
     def load_memory(self):
-        """Loads facts from the persistent store into the Prolog engine."""
+        """Loads facts from SQLite into the Prolog engine."""
         try:
-            # We treat memory.db as a Prolog file
-            # SWI-Prolog consults the file to load predicates
-            self.prolog.consult(DB_PATH)
-            logger.info(f"Memory loaded successfully from {DB_PATH}")
-        except Exception as e:
-            logger.error(f"Failed to load memory from {DB_PATH}: {e}")
-
-    def save_memory(self):
-        """Saves current 'fact' predicates from Prolog to the persistent store."""
-        try:
-            # Query all facts: fact(Agent, Predicate, Value, Timestamp)
-            facts = list(self.prolog.query("fact(A, P, V, T)"))
-            with open(DB_PATH, 'w', encoding='utf-8') as f:
-                for fact in facts:
-                    # Escape single quotes in values for Prolog
-                    agent = str(fact['A']).replace("'", "\\'")
-                    pred = str(fact['P']).replace("'", "\\'")
-                    val = fact['V']
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.execute("SELECT agent_id, predicate, value, timestamp FROM facts")
+                count = 0
+                for row in cursor:
+                    agent, pred, val_str, ts = row
+                    # Escape for Prolog
+                    agent_safe = agent.replace("'", "\\'")
+                    pred_safe = pred.replace("'", "\\'")
+                    
+                    # Try to parse JSON value if it was complex, else use as raw
+                    try:
+                        val = json.loads(val_str)
+                    except:
+                        val = val_str
+                    
                     if isinstance(val, str):
                         escaped = val.replace("'", "\\'")
-                        val = f"'{escaped}'"
-                    elif isinstance(val, (int, float)):
-                        pass
+                        val_safe = f"'{escaped}'"
                     else:
-                        escaped = str(val).replace("'", "\\'")
-                        val = f"'{escaped}'"
+                        val_safe = val
                     
-                    f.write(f"fact('{agent}', '{pred}', {val}, {fact['T']}).\n")
-            logger.info(f"Memory saved to {DB_PATH}")
+                    self.prolog.assertz(f"fact('{agent_safe}', '{pred_safe}', {val_safe}, {ts})")
+                    count += 1
+                logger.info("Memory loaded from SQLite", path=DB_PATH, fact_count=count)
         except Exception as e:
-            logger.error(f"Failed to save memory: {e}")
+            logger.error("Failed to load memory from SQLite", error=str(e))
 
     def write(self, agent_id: str, protocol: str, payload: Dict[str, Any]):
-        """Reconciles payload fields using the semantic mapper and stores them as versioned facts."""
+        """Reconciles payload fields using semantic mapper and stores them in SQLite + Prolog."""
         timestamp = datetime.now(timezone.utc).timestamp()
-        
-        # 1. Flatten the payload
         flattened = self.mapper._flatten_dict(payload)
         facts_added = 0
         
-        for key, value in flattened.items():
-            # 2. Resolve field name to ontology concept
-            # We take the leaf key as the potential concept
-            leaf_key = key.split('.')[-1]
-            resolved = self.mapper.resolve_equivalent(leaf_key, protocol)
-            
-            # Extract concept from "PROTO:CONCEPT" or use leaf_key if not found
-            concept = resolved.split(':')[-1] if ':' in resolved else leaf_key
-            
-            # 3. Assert to Prolog
-            # Use fact(AgentID, Predicate, Value, Timestamp)
-            agent_safe = agent_id.replace("'", "\\'")
-            concept_safe = concept.replace("'", "\\'")
-            
-            if isinstance(value, str):
-                escaped = value.replace("'", "\\'")
-                val_safe = f"'{escaped}'"
-            else:
-                val_safe = value
+        with sqlite3.connect(DB_PATH) as conn:
+            for key, value in flattened.items():
+                leaf_key = key.split('.')[-1]
+                resolved = self.mapper.resolve_equivalent(leaf_key, protocol)
+                concept = resolved.split(':')[-1] if ':' in resolved else leaf_key
                 
-            self.prolog.assertz(f"fact('{agent_safe}', '{concept_safe}', {val_safe}, {timestamp})")
-            facts_added += 1
-        
-        # 4. Save to persistent store
-        self.save_memory()
+                # 1. Save to SQLite
+                val_str = json.dumps(value) if not isinstance(value, (str, int, float)) else str(value)
+                conn.execute(
+                    "INSERT INTO facts (agent_id, predicate, value, timestamp, protocol) VALUES (?, ?, ?, ?, ?)",
+                    (agent_id, concept, val_str, timestamp, protocol)
+                )
+                
+                # 2. Assert to Prolog for live reasoning
+                agent_safe = agent_id.replace("'", "\\'")
+                concept_safe = concept.replace("'", "\\'")
+                
+                if isinstance(value, str):
+                    clean_val = value.replace("'", "\\'")
+                    val_safe = f"'{clean_val}'"
+                else:
+                    val_safe = value
+                
+                self.prolog.assertz(f"fact('{agent_safe}', '{concept_safe}', {val_safe}, {timestamp})")
+                facts_added += 1
+            conn.commit()
         
         return {
             "status": "success",
@@ -149,7 +153,7 @@ class SwarmMemory:
         }
 
     def check_exists(self, key: str, value: Any, agent_id: Optional[str] = None) -> bool:
-        """Checks if a specific fact exists in memory."""
+        """Checks if a specific fact exists in memory (queries Prolog)."""
         val_safe = f"'{value}'" if isinstance(value, str) else value
         query_str = f"fact(A, '{key}', {val_safe}, T)"
         if agent_id:
@@ -159,8 +163,7 @@ class SwarmMemory:
         return len(results) > 0
 
     def query(self, key: str, agent_id: Optional[str] = None):
-        """Queries the memory and resolves conflicts using pyDatalog latest-timestamp rules."""
-        # 1. Fetch relevant facts from Prolog
+        """Queries memory and resolves conflicts using pyDatalog latest-timestamp rules."""
         query_str = f"fact(A, '{key}', V, T)"
         if agent_id:
             query_str = f"fact('{agent_id}', '{key}', V, T)"
@@ -169,20 +172,13 @@ class SwarmMemory:
         if not prolog_results:
             return None
         
-        # 2. Load facts into pyDatalog for resolution
         pyDatalog.clear()
         for res in prolog_results:
-            # Load as fact_data(Agent, Key, Value, Timestamp)
             + fact_data(str(res['A']), key, res['V'], res['T'])
         
-        # 3. Apply resolution rule (latest wins)
-        # latest_fact(Key, Value, Agent, Timestamp)
         res_list = latest_fact(key, Y, A, Z)
-        
         if res_list:
-            # Take the first resolved fact (should be one if timestamps are unique per key)
             resolved = res_list[0]
-            # resolved is (key, value, agent, timestamp)
             return {
                 "key": resolved[0],
                 "value": resolved[1],
@@ -196,22 +192,15 @@ memory_backend = SwarmMemory()
 
 @router.post("/memory/write")
 async def write_memory(request: MemoryWriteRequest):
-    """
-    Writes a payload to the swarm memory. 
-    Payload fields are resolved to ontology concepts before being stored.
-    """
     return memory_backend.write(request.agent_id, request.protocol, request.payload)
 
 @router.get("/memory/query", response_model=MemoryQueryResponse)
 async def query_memory(
-    key: str = Query(..., description="The semantic concept name (e.g., 'fullname' or 'price')"),
-    agent_id: Optional[str] = Query(None, description="Filter by a specific agent ID (optional)")
+    key: str = Query(..., description="The semantic concept name (e.g., 'fullname')"),
+    agent_id: Optional[str] = Query(None, description="Filter by agent ID")
 ):
-    """
-    Queries the swarm memory for a unified version of a fact.
-    Uses PyDatalog rules to resolve conflicts between multiple agents or versions.
-    """
     result = memory_backend.query(key, agent_id)
     if not result:
         raise HTTPException(status_code=404, detail="Fact not found in memory.")
     return result
+
