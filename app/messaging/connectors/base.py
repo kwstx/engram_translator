@@ -8,6 +8,7 @@ from app.core.translator import TranslatorEngine
 from app.semantic.mapper import SemanticMapper
 from app.core.config import settings
 from app.core.logging import bind_context
+from app.core.execution_events import emit_execution_event
 
 logger = structlog.get_logger(__name__)
 
@@ -142,6 +143,17 @@ class BaseConnector(abc.ABC):
         """
         bind_context(connector=self.name, user_id=user_id)
         start_time = time.time()
+
+        meta = message.get("metadata") or message.get("meta") or {}
+        task_id = meta.get("task_id")
+
+        await emit_execution_event(
+            "connection.open",
+            f"Connecting to [bold]{self.name}[/]...",
+            task_id=task_id,
+            db=db,
+            data={"connector": self.name},
+        )
         
         # 1. Normalization
         normalized_task = message
@@ -164,14 +176,37 @@ class BaseConnector(abc.ABC):
             tool_request = self.translate_to_tool(reconciled_task)
             logger.debug("Connector: translated request", request=tool_request)
 
+            await emit_execution_event(
+                "tool.request",
+                f"[bold]{self.name}[/] request dispatched.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name},
+            )
+
             tool_response = await self.call_tool(tool_request, db, user_id)
             logger.debug("Connector: received response")
+
+            await emit_execution_event(
+                "tool.response",
+                f"[bold]{self.name}[/] response received.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name},
+            )
 
             final_response = self.translate_from_tool(tool_response)
             
             duration = time.time() - start_time
             record_translation_success(f"connector_{self.name.lower()}", message_protocol, self.name.upper())
             record_connector_call(self.name, user_id or "unknown", "success", duration)
+            await emit_execution_event(
+                "connection.ok",
+                f"[bold]{self.name}[/] completed in {duration:.2f}s.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "duration": duration},
+            )
             
             logger.info("Connector execution successful", duration=duration)
             return final_response
@@ -181,6 +216,14 @@ class BaseConnector(abc.ABC):
             logger.error("Connector execution failed", error=str(e), duration=duration)
             record_translation_error(f"connector_{self.name.lower()}", message_protocol, self.name.upper())
             record_connector_call(self.name, user_id or "unknown", "error", duration)
+            await emit_execution_event(
+                "connection.error",
+                f"[bold]{self.name}[/] failed: {str(e)}",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "duration": duration},
+                level="error",
+            )
             return self.handle_error(e)
 
     async def _execute_workflow(self, steps: List[Dict[str, Any]], context: Dict[str, Any], db: Optional[Any] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -190,6 +233,8 @@ class BaseConnector(abc.ABC):
         logger.info("Starting multi-step workflow", step_count=len(steps))
         current_context = context.copy()
         history = []
+        meta = context.get("metadata") or context.get("meta") or {}
+        task_id = meta.get("task_id")
 
         for i, step in enumerate(steps):
             logger.info("Executing workflow step", step=i+1, total=len(steps))
@@ -204,7 +249,21 @@ class BaseConnector(abc.ABC):
             
             # Call tool
             try:
+                await emit_execution_event(
+                    "tool.request",
+                    f"[bold]{self.name}[/] workflow step {i + 1} request dispatched.",
+                    task_id=task_id,
+                    db=db,
+                    data={"connector": self.name, "step": i + 1},
+                )
                 step_resp = await self.call_tool(tool_req, db, user_id)
+                await emit_execution_event(
+                    "tool.response",
+                    f"[bold]{self.name}[/] workflow step {i + 1} response received.",
+                    task_id=task_id,
+                    db=db,
+                    data={"connector": self.name, "step": i + 1},
+                )
                 step_final = self.translate_from_tool(step_resp)
                 
                 # Update context with output for next step

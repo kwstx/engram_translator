@@ -369,8 +369,39 @@ class EngramTUI(App):
         height: 1fr;
     }
 
-    #log-view {
+    #main-left {
         width: 70%;
+    }
+
+    #trace-panels {
+        height: 16;
+        background: #12151c;
+        border: solid #2c3e50;
+        padding: 1;
+        margin-bottom: 1;
+    }
+
+    .trace-row {
+        height: 1fr;
+    }
+
+    .trace-panel {
+        width: 1fr;
+        border: solid #2c3e50;
+        margin-right: 1;
+        padding: 0 1;
+        background: #0f1115;
+    }
+
+
+    .trace-title {
+        text-style: bold;
+        color: #f39c12;
+        margin-bottom: 0;
+    }
+
+    #log-view {
+        height: 1fr;
         background: #12151c;
         border: solid #2c3e50;
         padding: 1;
@@ -529,8 +560,25 @@ class EngramTUI(App):
 
         # Main Layout
         with Horizontal(id="main-container"):
-            # Translation Log
-            yield RichLog(id="log-view", highlight=True, markup=True)
+            with Vertical(id="main-left"):
+                with Container(id="trace-panels"):
+                    with Horizontal(classes="trace-row"):
+                        with Vertical(classes="trace-panel"):
+                            yield Label("CONNECTIONS", classes="trace-title")
+                            yield RichLog(id="trace-connections", highlight=True, markup=True)
+                        with Vertical(classes="trace-panel"):
+                            yield Label("AGENT EXECUTION", classes="trace-title")
+                            yield RichLog(id="trace-agents", highlight=True, markup=True)
+                    with Horizontal(classes="trace-row"):
+                        with Vertical(classes="trace-panel"):
+                            yield Label("TOOL USAGE", classes="trace-title")
+                            yield RichLog(id="trace-tools", highlight=True, markup=True)
+                        with Vertical(classes="trace-panel"):
+                            yield Label("RESPONSES", classes="trace-title")
+                            yield RichLog(id="trace-responses", highlight=True, markup=True)
+
+                # Translation Log
+                yield RichLog(id="log-view", highlight=True, markup=True)
             
             # Sidebar info
             with Vertical(id="sidebar"):
@@ -618,14 +666,55 @@ class EngramTUI(App):
         # Ensure there's an event loop for this thread if needed, or just use the app's loop
         self.run_worker(run_listener())
 
-    def log_message(self, message: str) -> None:
+    def log_message(self, message: Any) -> None:
         """Update the log view with a new message."""
         log_view = self.query_one("#log-view", RichLog)
         # Add timestamp
         from datetime import datetime
         now = datetime.now().strftime("%H:%M:%S")
-        log_view.write(f"[dim]{now}[/] {message}")
-        self._handle_task_event(message)
+
+        display = message
+        if isinstance(message, dict):
+            display = message.get("message") or message.get("type") or str(message)
+            self._route_trace_event(message)
+        log_view.write(f"[dim]{now}[/] {display}")
+        if isinstance(display, str):
+            self._handle_task_event(display)
+
+    def _write_trace(self, selector: str, message: str) -> None:
+        try:
+            panel = self.query_one(selector, RichLog)
+            panel.write(message)
+        except Exception:
+            pass
+
+    def _route_trace_event(self, event: Dict[str, Any]) -> None:
+        event_type = event.get("type", "")
+        message = event.get("message") or event_type
+
+        if event_type.startswith("connection"):
+            self._write_trace("#trace-connections", message)
+            return
+        if event_type.startswith("agent"):
+            self._write_trace("#trace-agents", message)
+            return
+        if event_type.startswith("tool"):
+            self._write_trace("#trace-tools", message)
+            return
+        if event_type.startswith("response"):
+            self._write_trace("#trace-responses", message)
+            return
+
+        # Fallback: try to route by keywords
+        msg_lower = str(message).lower()
+        if "handing off" in msg_lower or "orchestration plan" in msg_lower:
+            self._write_trace("#trace-agents", message)
+        elif "response" in msg_lower:
+            self._write_trace("#trace-responses", message)
+        elif "connect" in msg_lower or "connector" in msg_lower:
+            self._write_trace("#trace-connections", message)
+        else:
+            self._write_trace("#trace-tools", message)
 
     def _handle_task_event(self, message: str) -> None:
         """Parse orchestration events and update the task tracker panel."""

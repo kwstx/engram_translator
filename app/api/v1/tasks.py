@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.db.session import get_session
 from app.core.security import get_current_principal, verify_engram_token
-from app.db.models import Task, TaskStatus
+from app.db.models import Task, TaskStatus, TaskEvent
 from app.messaging.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.core.logging import bind_context
 
@@ -33,6 +33,14 @@ class TaskStatusResponse(BaseModel):
     results: Optional[Dict[str, Any]] = None
     last_error: Optional[str] = None
     message: Optional[str] = None
+
+class TaskEventResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    event_type: str
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    created_at: datetime
 
 @router.post("/submit", response_model=TaskSubmitResponse)
 async def submit_multi_agent_task(
@@ -170,3 +178,37 @@ async def list_tasks(
     tasks = res.scalars().all()
     # Defensive filter in case legacy rows lack user_id
     return [task for task in tasks if task.user_id == user_uuid]
+
+@router.get("/{task_id}/events", response_model=List[TaskEventResponse])
+async def list_task_events(
+    task_id: uuid.UUID,
+    since: Optional[float] = None,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal),
+):
+    """
+    Returns recent execution events for a task (used for CLI/TUI live traces).
+    """
+    user_sub = principal.get("sub")
+    if not user_sub:
+        raise HTTPException(status_code=401, detail="Subject missing in token.")
+    try:
+        user_uuid = uuid.UUID(str(user_sub))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user identifier in token.")
+
+    task_stmt = select(Task).where(Task.id == task_id, Task.user_id == user_uuid)
+    task_res = await db.execute(task_stmt)
+    task = task_res.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    stmt = select(TaskEvent).where(TaskEvent.task_id == task_id)
+    if since:
+        since_dt = datetime.fromtimestamp(since, tz=timezone.utc)
+        stmt = stmt.where(TaskEvent.created_at > since_dt)
+
+    stmt = stmt.order_by(TaskEvent.created_at.asc()).limit(limit)
+    res = await db.execute(stmt)
+    return res.scalars().all()

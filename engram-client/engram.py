@@ -5,11 +5,14 @@ import httpx
 import asyncio
 import time
 from typing import Optional, Dict, Any, List
+from collections import deque
+from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
+from rich.live import Live
 from cryptography.fernet import Fernet, InvalidToken
 
 console = Console()
@@ -237,6 +240,80 @@ def _render_task_results(results: Optional[Dict[str, Any]]) -> None:
         console.print(f"  [bold cyan]{agent_id}[/]")
         syntax = Syntax(json.dumps(output, indent=2), "json", theme="monokai", line_numbers=False)
         console.print(syntax)
+
+class ExecutionTraceState:
+    def __init__(self, max_lines: int = 8):
+        self.connections = deque(maxlen=max_lines)
+        self.agents = deque(maxlen=max_lines)
+        self.tools = deque(maxlen=max_lines)
+        self.responses = deque(maxlen=max_lines)
+        self.last_ts = 0.0
+
+    def _format_time(self, ts: Optional[float]) -> str:
+        if not ts:
+            return "--:--:--"
+        return datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+
+    def _route(self, event_type: str, line: str) -> None:
+        if event_type.startswith("connection"):
+            self.connections.append(line)
+            return
+        if event_type.startswith("agent"):
+            self.agents.append(line)
+            return
+        if event_type.startswith("tool"):
+            self.tools.append(line)
+            return
+        if event_type.startswith("response"):
+            self.responses.append(line)
+            return
+
+        lower = line.lower()
+        if "handing off" in lower or "orchestration plan" in lower:
+            self.agents.append(line)
+        elif "response" in lower:
+            self.responses.append(line)
+        elif "connect" in lower or "connector" in lower:
+            self.connections.append(line)
+        else:
+            self.tools.append(line)
+
+    def add_event(self, event: Dict[str, Any]) -> None:
+        event_type = event.get("event_type") or event.get("type") or "execution.log"
+        message = event.get("message") or event_type
+        created_at = event.get("created_at")
+        ts = None
+        if created_at:
+            try:
+                ts = datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                ts = None
+        if ts and ts > self.last_ts:
+            self.last_ts = ts
+        timestamp = self._format_time(ts)
+        line = f"[dim]{timestamp}[/] {message}"
+        self._route(event_type, line)
+
+def _render_trace_panel(title: str, lines: deque, border_style: str) -> Panel:
+    if lines:
+        content = "\n".join(lines)
+    else:
+        content = "[dim]Waiting for events...[/]"
+    return Panel(content, title=title, border_style=border_style)
+
+def _render_trace_view(state: ExecutionTraceState, task_id: str, status: str) -> Panel:
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+    grid.add_row(
+        _render_trace_panel("Connections", state.connections, "cyan"),
+        _render_trace_panel("Agent Execution", state.agents, "yellow"),
+    )
+    grid.add_row(
+        _render_trace_panel("Tool Usage", state.tools, "magenta"),
+        _render_trace_panel("Responses", state.responses, "green"),
+    )
+    return Panel(grid, title=f"Execution Trace • Task {task_id} • {status}", border_style="orange1")
 
 def _render_status(config: Dict[str, Any]) -> None:
     base_url = config["base_url"]
@@ -472,15 +549,34 @@ def execute(task_text, wait, poll_seconds):
         if not wait:
             return
 
+        trace_state = ExecutionTraceState()
+        events_supported = True
         last_status = None
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task_description}"),
-            transient=True,
-        ) as progress:
-            progress.add_task(description="Waiting for workflow execution...", total=None)
+        status = payload.get("status") or "PENDING"
+        with Live(_render_trace_view(trace_state, str(task_id), status), refresh_per_second=4) as live:
             while True:
                 await asyncio.sleep(poll_seconds)
+
+                # Fetch execution events (if supported)
+                if events_supported:
+                    events_path = f"/tasks/{task_id}/events"
+                    if trace_state.last_ts:
+                        events_path += f"?since={trace_state.last_ts}"
+                    events_resp = await _authed_request(
+                        config,
+                        "GET",
+                        events_path,
+                        timeout=30.0,
+                        allow_retry=False,
+                    )
+                    if events_resp.status_code == 200:
+                        for event in events_resp.json():
+                            trace_state.add_event(event)
+                    elif events_resp.status_code in (404, 422):
+                        events_supported = False
+                    else:
+                        console.print(f"[yellow]WARN[/] Event stream unavailable: {events_resp.text}")
+
                 status_resp = await _authed_request(
                     config,
                     "GET",
@@ -494,6 +590,9 @@ def execute(task_text, wait, poll_seconds):
                 if status != last_status:
                     last_status = status
                     console.print(f"[dim]Status[/]: {status}")
+
+                live.update(_render_trace_view(trace_state, str(task_id), status))
+
                 if status in ("COMPLETED", "DEAD_LETTER"):
                     console.print(Panel(
                         f"[bold]Final Status:[/] {status}",

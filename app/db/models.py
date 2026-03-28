@@ -161,6 +161,24 @@ class Task(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True)),
     )
 
+class TaskEvent(SQLModel, table=True):
+    __tablename__ = "task_events"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("tasks.id"), index=True, nullable=False)
+    )
+    event_type: str = Field(index=True, nullable=False)
+    message: str = Field(nullable=False)
+    data: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), index=True),
+    )
+
 class AgentMessage(SQLModel, table=True):
     __tablename__ = "agent_messages"
 
