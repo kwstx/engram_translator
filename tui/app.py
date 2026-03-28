@@ -18,6 +18,36 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 
+PROVIDERS = [
+    {
+        "id": "claude",
+        "name": "Claude",
+        "auth": "api_key",
+        "hint": "Anthropic API key",
+    },
+    {
+        "id": "perplexity",
+        "name": "Perplexity",
+        "auth": "api_key",
+        "hint": "Perplexity API key",
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "auth": "oauth",
+        "hint": "Slack OAuth token",
+    },
+    {
+        "id": "custom",
+        "name": "Other Tools",
+        "auth": "api_key",
+        "hint": "Any provider API key or OAuth token",
+        "custom": True,
+    },
+]
+
+PROVIDER_MAP = {provider["id"]: provider for provider in PROVIDERS}
+
 def _ensure_key() -> bytes:
     os.makedirs(CONFIG_DIR, exist_ok=True)
     if os.path.exists(KEY_FILE):
@@ -220,6 +250,92 @@ class AuthScreen(Screen):
         save_config(config)
         self.dismiss(config)
 
+class ServiceConnectScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, provider: Dict[str, Any]):
+        super().__init__()
+        self.provider = provider
+
+    def compose(self) -> ComposeResult:
+        provider_name = self.provider.get("name", "Provider")
+        display_name = self.provider.get("display_name") or provider_name
+        auth_hint = self.provider.get("hint", "")
+        auth_label = "API Key" if self.provider.get("auth") == "api_key" else "OAuth Token"
+        with Container(id="service-connect-container"):
+            yield Label(f"Connect {display_name}", id="service-connect-title")
+            if self.provider.get("custom"):
+                yield Label("Provider Name")
+                yield Input(
+                    value=self.provider.get("prefill_name", ""),
+                    placeholder="e.g., notion, github, linear",
+                    id="provider-name-input",
+                )
+            else:
+                yield Label("Provider")
+                yield Label(display_name, id="provider-name-label")
+            yield Label(f"{auth_label}")
+            yield Input(password=True, placeholder=auth_hint or "Paste token", id="provider-token-input")
+            yield Label("", id="service-connect-error")
+            with Horizontal(id="service-connect-buttons"):
+                yield Button("Connect", id="service-connect-btn", variant="primary")
+                yield Button("Cancel", id="service-cancel-btn")
+
+    def on_mount(self) -> None:
+        if self.provider.get("custom"):
+            self.query_one("#provider-name-input", Input).focus()
+        else:
+            self.query_one("#provider-token-input", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _set_error(self, message: str) -> None:
+        label = self.query_one("#service-connect-error", Label)
+        label.update(message)
+
+    @on(Button.Pressed, "#service-cancel-btn")
+    def handle_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#service-connect-btn")
+    async def handle_connect(self) -> None:
+        app = self.app
+        provider_id = self.provider.get("id")
+        if self.provider.get("custom"):
+            provider_name = self.query_one("#provider-name-input", Input).value.strip().lower()
+        else:
+            provider_name = provider_id or ""
+
+        token = self.query_one("#provider-token-input", Input).value.strip()
+        if not provider_name:
+            self._set_error("Provider name is required.")
+            return
+        if not token:
+            self._set_error("Token is required.")
+            return
+
+        credential_type = "API_KEY" if self.provider.get("auth") == "api_key" else "OAUTH_TOKEN"
+        payload = {
+            "provider_name": provider_name,
+            "token": token,
+            "credential_type": credential_type,
+            "metadata": {
+                "source": "tui",
+                "display_name": self.provider.get("name"),
+                "flow": self.provider.get("auth"),
+            },
+        }
+
+        response = await app._authed_request("POST", "/credentials", json_body=payload)
+        if response.status_code not in (200, 201):
+            self._set_error(_extract_error_detail(response))
+            return
+
+        self.dismiss({"provider_name": provider_name})
+
 # ASCII header
 LOGO = """
   [bold orange1]______ _   _  _____ _____            __  __ [/]
@@ -324,12 +440,62 @@ class EngramTUI(App):
         color: #e74c3c;
         margin-top: 1;
     }
+
+    #service-connect-container {
+        width: 70%;
+        height: auto;
+        padding: 2 3;
+        border: solid #d35400;
+        background: #1a1e26;
+        margin: 2 auto;
+    }
+
+    #service-connect-title {
+        content-align: center middle;
+        text-style: bold;
+        color: #d35400;
+        margin-bottom: 1;
+    }
+
+    #service-connect-buttons {
+        margin-top: 1;
+        height: auto;
+    }
+
+    #service-connect-error {
+        color: #e74c3c;
+        margin-top: 1;
+    }
+
+    #services-panel {
+        margin-top: 1;
+        border-top: solid #2c3e50;
+        padding-top: 1;
+    }
+
+    .service-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .service-name {
+        width: 45%;
+    }
+
+    .service-status {
+        width: 30%;
+    }
+
+    .service-btn {
+        width: 25%;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit", show=True),
         Binding("c", "clear", "Clear Logs", show=True),
         Binding("r", "refresh", "Refresh Stats", show=True),
+        Binding("s", "services", "Services", show=True),
     ]
 
     def __init__(self):
@@ -338,6 +504,7 @@ class EngramTUI(App):
         self.eat: Optional[str] = None
         self.base_url: str = DEFAULT_BASE_URL
         self.user_email: Optional[str] = None
+        self.connected_providers = set()
 
     def compose(self) -> ComposeResult:
         # Header with Logo
@@ -365,6 +532,16 @@ class EngramTUI(App):
                 yield Label("/agents - List connected agents", classes="stat-item")
                 yield Label("/login  - Sign in", classes="stat-item")
                 yield Label("/logout - Sign out", classes="stat-item")
+                yield Label("/services - Refresh services", classes="stat-item")
+                yield Label("/connect <provider> - Connect service", classes="stat-item")
+
+                with Container(id="services-panel"):
+                    yield Label("CONNECTED SERVICES", classes="sidebar-title")
+                    for provider in PROVIDERS:
+                        with Horizontal(classes="service-row"):
+                            yield Label(provider["name"], id=f"service-name-{provider['id']}", classes="service-name")
+                            yield Label("Not connected", id=f"service-status-{provider['id']}", classes="service-status status-waiting")
+                            yield Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn")
 
         # Input Area (Command prompt)
         yield Input(placeholder="Type a command or press Enter to continue...", id="command-input")
@@ -391,6 +568,7 @@ class EngramTUI(App):
         
         # Start background listener
         self.message_receiver()
+        self.run_worker(self.refresh_connected_services(), thread=False)
 
     @work(exclusive=True, thread=True)
     def message_receiver(self):
@@ -449,6 +627,18 @@ class EngramTUI(App):
             self.push_screen(AuthScreen(load_config()), self._handle_auth_result)
         elif cmd == "/agents":
             log_view.write("Ã¢ÂÂ¹Ã¯Â¸Â [bold yellow]Agents:[/] No active agent connections yet.")
+        elif cmd == "/services":
+            self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
+        elif cmd.startswith("/connect"):
+            parts = cmd.split()
+            if len(parts) < 2:
+                log_view.write("[yellow]Usage:[/] /connect <provider>")
+            else:
+                provider_id = parts[1].strip().lower()
+                if provider_id in PROVIDER_MAP:
+                    self._open_service_connect(provider_id)
+                else:
+                    self._open_service_connect("custom", custom_name=provider_id)
         elif cmd.startswith("/"):
             log_view.write(f"Ã¢ÂÂ Ã¯Â¸Â Unknown command: [dim]{cmd}[/]")
         else:
@@ -459,6 +649,9 @@ class EngramTUI(App):
     def action_clear(self) -> None:
         self.query_one("#log-view", RichLog).clear()
 
+    def action_services(self) -> None:
+        self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
+
     def _handle_auth_result(self, result: Optional[Dict[str, Any]]) -> None:
         if not result:
             return
@@ -466,6 +659,7 @@ class EngramTUI(App):
         self.token = result.get("token")
         self.eat = result.get("eat")
         self.user_email = result.get("email")
+        self.run_worker(self.refresh_connected_services(), thread=False)
 
     async def _prompt_reauth(self) -> bool:
         loop = asyncio.get_running_loop()
@@ -605,6 +799,89 @@ class EngramTUI(App):
                 else:
                     log_view.write("[dim]No workflow results recorded yet.[/]")
                 break
+
+    def _set_service_status(self, provider_id: str, status: str, connected: bool) -> None:
+        label = self.query_one(f"#service-status-{provider_id}", Label)
+        label.update(status)
+        label.remove_class("status-ok")
+        label.remove_class("status-waiting")
+        label.remove_class("status-error")
+        if connected:
+            label.add_class("status-ok")
+        else:
+            label.add_class("status-waiting")
+
+        button = self.query_one(f"#service-connect-{provider_id}", Button)
+        if provider_id == "custom":
+            button.disabled = False
+            button.label = "Add"
+        else:
+            button.disabled = connected
+            button.label = "Connected" if connected else "Connect"
+
+    async def refresh_connected_services(self, show_log: bool = False) -> None:
+        log_view = self.query_one("#log-view", RichLog)
+        if show_log:
+            log_view.write("[dim]Refreshing connected services...[/]")
+
+        if not self.token and not self.eat:
+            for provider in PROVIDERS:
+                self._set_service_status(provider["id"], "Login required", False)
+            return
+
+        eat = await self._ensure_eat()
+        if not eat:
+            for provider in PROVIDERS:
+                self._set_service_status(provider["id"], "Auth required", False)
+            return
+
+        response = await self._authed_request("GET", "/credentials")
+        if response.status_code != 200:
+            for provider in PROVIDERS:
+                self._set_service_status(provider["id"], "Unavailable", False)
+            if show_log:
+                log_view.write(f"[bold red]Credential fetch failed:[/] {_extract_error_detail(response)}")
+            return
+
+        payload = response.json()
+        connected = {item.get("provider_name", "").lower() for item in payload if item.get("provider_name")}
+        self.connected_providers = connected
+
+        known = {provider["id"] for provider in PROVIDERS if not provider.get("custom")}
+        for provider in PROVIDERS:
+            if provider.get("custom"):
+                extras = [name for name in connected if name not in known]
+                if extras:
+                    self._set_service_status(provider["id"], f"Connected ({len(extras)})", True)
+                else:
+                    self._set_service_status(provider["id"], "Not connected", False)
+                continue
+            is_connected = provider["id"] in connected
+            self._set_service_status(provider["id"], "Connected" if is_connected else "Not connected", is_connected)
+
+    def _open_service_connect(self, provider_id: str, custom_name: Optional[str] = None) -> None:
+        provider = PROVIDER_MAP.get(provider_id)
+        if not provider:
+            return
+        if provider.get("custom") and custom_name:
+            provider = {
+                **provider,
+                "prefill_name": custom_name,
+                "display_name": custom_name,
+            }
+        self.push_screen(ServiceConnectScreen(provider), self._handle_service_connect_result)
+
+    def _handle_service_connect_result(self, result: Optional[Dict[str, Any]]) -> None:
+        if not result:
+            return
+        self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
+
+    @on(Button.Pressed)
+    def handle_service_button(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id.startswith("service-connect-"):
+            provider_id = button_id.replace("service-connect-", "")
+            self._open_service_connect(provider_id)
 
 if __name__ == "__main__":
     from textual import run
