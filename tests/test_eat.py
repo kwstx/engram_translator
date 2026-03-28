@@ -7,10 +7,16 @@ import jwt
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import timedelta
 from app.main import app
 from app.db.session import get_session
 from app.db.models import User, PermissionProfile
-from app.core.security import create_engram_access_token, check_permissions, get_current_principal
+from app.core.security import (
+    create_engram_access_token,
+    check_permissions,
+    get_current_principal,
+    verify_engram_token,
+)
 
 @pytest.fixture
 def client():
@@ -44,6 +50,32 @@ def test_create_engram_access_token():
     assert "read" in payload["scope"]
     assert "write" in payload["scope"]
     assert "execute" in payload["scope"]
+
+def test_verify_engram_token_rejects_expired():
+    user_id = str(uuid4())
+    token = create_engram_access_token(
+        user_id,
+        permissions={"tool_a": ["read"]},
+        expires_delta=timedelta(seconds=-1),
+    )
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        verify_engram_token(token)
+    assert exc.value.status_code == 401
+    assert "expired" in exc.value.detail.lower()
+
+def test_verify_engram_token_rejects_invalid_signature():
+    user_id = str(uuid4())
+    token = create_engram_access_token(
+        user_id,
+        permissions={"tool_a": ["read"]},
+    )
+    # Corrupt the token to invalidate the signature
+    bad_token = token[:-1] + ("a" if token[-1] != "a" else "b")
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        verify_engram_token(bad_token)
+    assert exc.value.status_code == 401
 
 @pytest.mark.asyncio
 async def test_generate_eat_endpoint(client):

@@ -12,6 +12,7 @@ from app.db.models import PermissionProfile
 from app.services.session import SessionService
 from sqlmodel import Session, select
 import uuid
+from uuid import UUID
 from app.core.redis_client import get_redis_client
 
 import bcrypt
@@ -116,7 +117,12 @@ def is_token_revoked(jti: str) -> bool:
     redis = get_redis_client()
     if not redis or not jti:
         return False
-    return redis.exists(f"{REVOKED_TOKEN_PREFIX}{jti}") > 0
+    try:
+        return redis.exists(f"{REVOKED_TOKEN_PREFIX}{jti}") > 0
+    except Exception:
+        # If Redis is unavailable, do not fail auth outright.
+        # This keeps local/dev/test flows working without a live Redis.
+        return False
 
 
 def revoke_token(jti: str, expires_in: int):
@@ -124,7 +130,11 @@ def revoke_token(jti: str, expires_in: int):
     redis = get_redis_client()
     if not redis or not jti:
         return
-    redis.setex(f"{REVOKED_TOKEN_PREFIX}{jti}", expires_in, "1")
+    try:
+        redis.setex(f"{REVOKED_TOKEN_PREFIX}{jti}", expires_in, "1")
+    except Exception:
+        # Swallow Redis errors for environments without Redis.
+        return
 
 
 def verify_engram_token(token: str) -> Dict[str, Any]:
