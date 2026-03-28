@@ -173,8 +173,22 @@ class BaseConnector(abc.ABC):
 
             # 3. Standard single-step execution
             reconciled_task = self.reconcile_schema(normalized_task, self.name.upper())
+            await emit_execution_event(
+                "translation.engram",
+                f"[bold]{self.name}[/] normalized Engram task.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "payload": reconciled_task},
+            )
             tool_request = self.translate_to_tool(reconciled_task)
             logger.debug("Connector: translated request", request=tool_request)
+            await emit_execution_event(
+                "translation.request",
+                f"[bold]{self.name}[/] translated tool request.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "payload": tool_request},
+            )
 
             await emit_execution_event(
                 "tool.request",
@@ -186,6 +200,13 @@ class BaseConnector(abc.ABC):
 
             tool_response = await self.call_tool(tool_request, db, user_id)
             logger.debug("Connector: received response")
+            await emit_execution_event(
+                "translation.response",
+                f"[bold]{self.name}[/] tool response received.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "payload": tool_response},
+            )
 
             await emit_execution_event(
                 "tool.response",
@@ -245,7 +266,21 @@ class BaseConnector(abc.ABC):
             
             # Reconcile and translate
             reconciled_step = self.reconcile_schema(step_task, self.name.upper())
+            await emit_execution_event(
+                "translation.engram",
+                f"[bold]{self.name}[/] workflow step {i + 1} normalized Engram task.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "step": i + 1, "payload": reconciled_step},
+            )
             tool_req = self.translate_to_tool(reconciled_step)
+            await emit_execution_event(
+                "translation.request",
+                f"[bold]{self.name}[/] workflow step {i + 1} translated tool request.",
+                task_id=task_id,
+                db=db,
+                data={"connector": self.name, "step": i + 1, "payload": tool_req},
+            )
             
             # Call tool
             try:
@@ -257,6 +292,13 @@ class BaseConnector(abc.ABC):
                     data={"connector": self.name, "step": i + 1},
                 )
                 step_resp = await self.call_tool(tool_req, db, user_id)
+                await emit_execution_event(
+                    "translation.response",
+                    f"[bold]{self.name}[/] workflow step {i + 1} tool response received.",
+                    task_id=task_id,
+                    db=db,
+                    data={"connector": self.name, "step": i + 1, "payload": step_resp},
+                )
                 await emit_execution_event(
                     "tool.response",
                     f"[bold]{self.name}[/] workflow step {i + 1} response received.",

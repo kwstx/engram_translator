@@ -374,7 +374,7 @@ class EngramTUI(App):
     }
 
     #trace-panels {
-        height: 16;
+        height: 13;
         background: #12151c;
         border: solid #2c3e50;
         padding: 1;
@@ -391,6 +391,28 @@ class EngramTUI(App):
         margin-right: 1;
         padding: 0 1;
         background: #0f1115;
+    }
+
+    #translation-panel {
+        height: 10;
+        background: #12151c;
+        border: solid #2c3e50;
+        padding: 1;
+        margin-bottom: 1;
+    }
+
+    .translation-panel {
+        width: 1fr;
+        border: solid #2c3e50;
+        margin-right: 1;
+        padding: 0 1;
+        background: #0f1115;
+    }
+
+    .translation-title {
+        text-style: bold;
+        color: #f39c12;
+        margin-bottom: 0;
     }
 
 
@@ -577,6 +599,18 @@ class EngramTUI(App):
                             yield Label("RESPONSES", classes="trace-title")
                             yield RichLog(id="trace-responses", highlight=True, markup=True)
 
+                with Container(id="translation-panel"):
+                    with Horizontal():
+                        with Vertical(classes="translation-panel"):
+                            yield Label("ENGRAM TASK", classes="translation-title")
+                            yield RichLog(id="translation-engram", highlight=True, markup=True)
+                        with Vertical(classes="translation-panel"):
+                            yield Label("TOOL REQUEST", classes="translation-title")
+                            yield RichLog(id="translation-request", highlight=True, markup=True)
+                        with Vertical(classes="translation-panel"):
+                            yield Label("TOOL RESPONSE", classes="translation-title")
+                            yield RichLog(id="translation-response", highlight=True, markup=True)
+
                 # Translation Log
                 yield RichLog(id="log-view", highlight=True, markup=True)
             
@@ -677,6 +711,7 @@ class EngramTUI(App):
         if isinstance(message, dict):
             display = message.get("message") or message.get("type") or str(message)
             self._route_trace_event(message)
+            self._route_translation_event(message)
         log_view.write(f"[dim]{now}[/] {display}")
         if isinstance(display, str):
             self._handle_task_event(display)
@@ -688,9 +723,53 @@ class EngramTUI(App):
         except Exception:
             pass
 
+    def _format_translation_payload(self, payload: Any) -> str:
+        try:
+            formatted = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
+        except Exception:
+            formatted = str(payload)
+        return self._truncate_translation_payload(formatted)
+
+    def _truncate_translation_payload(self, text: str, max_chars: int = 3000) -> str:
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}\n...[truncated]"
+
+    def _set_translation_panel(self, selector: str, header: str, payload: Any) -> None:
+        try:
+            panel = self.query_one(selector, RichLog)
+            panel.clear()
+            panel.write(header)
+            panel.write(self._format_translation_payload(payload))
+        except Exception:
+            pass
+
+    def _route_translation_event(self, event: Dict[str, Any]) -> None:
+        event_type = event.get("type", "")
+        if not event_type.startswith("translation."):
+            return
+
+        data = event.get("data") or {}
+        payload = data.get("payload")
+        connector = data.get("connector", "Unknown")
+        step = data.get("step")
+        step_label = f" step {step}" if step else ""
+        header = f"[bold]{connector}[/]{step_label}"
+
+        if event_type == "translation.engram":
+            self._set_translation_panel("#translation-engram", header, payload)
+        elif event_type == "translation.request":
+            self._set_translation_panel("#translation-request", header, payload)
+        elif event_type == "translation.response":
+            self._set_translation_panel("#translation-response", header, payload)
+        else:
+            self._set_translation_panel("#translation-request", header, payload)
+
     def _route_trace_event(self, event: Dict[str, Any]) -> None:
         event_type = event.get("type", "")
         message = event.get("message") or event_type
+        if event_type.startswith("translation."):
+            return
 
         if event_type.startswith("connection"):
             self._write_trace("#trace-connections", message)
