@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     AGENT_MESSAGE_LEASE_SECONDS: int = 60
     AGENT_MESSAGE_MAX_ATTEMPTS: int = 5
 
+    # Workflow scheduler
+    WORKFLOW_SCHEDULER_POLL_SECONDS: float = 5.0
+    WORKFLOW_SCHEDULER_BATCH_SIZE: int = 20
+
     # MiroFish Bridge
     MIROFISH_BASE_URL: str = "http://localhost:5001"
     MIROFISH_DEFAULT_NUM_AGENTS: int = 1000

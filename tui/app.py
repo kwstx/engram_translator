@@ -1,6 +1,6 @@
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, RichLog, Input, Label, Button
+from textual.widgets import Header, Footer, Static, RichLog, Input, Label, Button, ListView, ListItem
 from textual.binding import Binding
 from textual import on, work
 from textual.screen import Screen
@@ -336,6 +336,329 @@ class ServiceConnectScreen(Screen):
 
         self.dismiss({"provider_name": provider_name})
 
+class WorkflowListScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("r", "refresh", "Refresh"),
+    ]
+
+    def __init__(self, app_ref: "EngramTUI"):
+        super().__init__()
+        self.app_ref = app_ref
+        self.workflow_map: Dict[str, Dict[str, Any]] = {}
+        self.selected_workflow_id: Optional[str] = None
+
+    def compose(self) -> ComposeResult:
+        with Container(id="workflow-container"):
+            yield Label("Workflows", id="workflow-title")
+            yield ListView(id="workflow-list")
+            with Horizontal(id="workflow-buttons"):
+                yield Button("Create", id="workflow-create-btn", variant="primary")
+                yield Button("Run", id="workflow-run-btn")
+                yield Button("Schedule", id="workflow-schedule-btn")
+                yield Button("Runs", id="workflow-runs-btn")
+                yield Button("Refresh", id="workflow-refresh-btn")
+                yield Button("Close", id="workflow-close-btn")
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load_workflows(), thread=False)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def action_refresh(self) -> None:
+        self.run_worker(self._load_workflows(), thread=False)
+
+    async def _load_workflows(self) -> None:
+        list_view = self.query_one("#workflow-list", ListView)
+        list_view.clear()
+        self.workflow_map = {}
+        response = await self.app_ref._authed_request("GET", "/workflows?limit=100")
+        if response.status_code != 200:
+            list_view.append(ListItem(Label(f"Error: {_extract_error_detail(response)}")))
+            return
+        workflows = response.json()
+        if not workflows:
+            list_view.append(ListItem(Label("No workflows created yet.")))
+            return
+        for wf in workflows:
+            wf_id = str(wf.get("id"))
+            name = wf.get("name") or "Untitled"
+            updated = wf.get("updated_at") or ""
+            active = "ACTIVE" if wf.get("is_active") else "PAUSED"
+            line = f"{name} | {wf_id} | {active} | {updated}"
+            item = ListItem(Label(line))
+            item.id = f"workflow-{wf_id}"
+            list_view.append(item)
+            self.workflow_map[wf_id] = wf
+
+    @on(ListView.Selected, "#workflow-list")
+    def _select_workflow(self, event: ListView.Selected) -> None:
+        item = event.item
+        if not item or not item.id:
+            self.selected_workflow_id = None
+            return
+        self.selected_workflow_id = item.id.replace("workflow-", "")
+
+    def _get_selected_workflow(self) -> Optional[Dict[str, Any]]:
+        if not self.selected_workflow_id:
+            return None
+        return self.workflow_map.get(self.selected_workflow_id)
+
+    @on(Button.Pressed, "#workflow-close-btn")
+    def _handle_close(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#workflow-refresh-btn")
+    def _handle_refresh(self) -> None:
+        self.run_worker(self._load_workflows(), thread=False)
+
+    @on(Button.Pressed, "#workflow-create-btn")
+    def _handle_create(self) -> None:
+        self.app.push_screen(WorkflowCreateScreen(self.app_ref), self._handle_child_result)
+
+    @on(Button.Pressed, "#workflow-run-btn")
+    def _handle_run(self) -> None:
+        workflow = self._get_selected_workflow()
+        if not workflow:
+            return
+        self.run_worker(self._run_workflow(workflow), thread=False)
+
+    @on(Button.Pressed, "#workflow-schedule-btn")
+    def _handle_schedule(self) -> None:
+        workflow = self._get_selected_workflow()
+        if not workflow:
+            return
+        self.app.push_screen(WorkflowScheduleScreen(self.app_ref, workflow), self._handle_child_result)
+
+    @on(Button.Pressed, "#workflow-runs-btn")
+    def _handle_runs(self) -> None:
+        workflow = self._get_selected_workflow()
+        if not workflow:
+            return
+        self.app.push_screen(WorkflowRunsScreen(self.app_ref, workflow))
+
+    def _handle_child_result(self, result: Optional[Dict[str, Any]]) -> None:
+        if result and result.get("refresh"):
+            self.run_worker(self._load_workflows(), thread=False)
+
+    async def _run_workflow(self, workflow: Dict[str, Any]) -> None:
+        log_view = self.app_ref.query_one("#log-view", RichLog)
+        wf_id = workflow.get("id")
+        response = await self.app_ref._authed_request("POST", f"/workflows/{wf_id}/run")
+        if response.status_code != 200:
+            log_view.write(f"[bold red]Workflow run failed:[/] {_extract_error_detail(response)}")
+            return
+        payload = response.json()
+        log_view.write(f"[bold green]Workflow queued:[/] {wf_id} (Task {payload.get('task_id')})")
+
+
+class WorkflowCreateScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, app_ref: "EngramTUI"):
+        super().__init__()
+        self.app_ref = app_ref
+
+    def compose(self) -> ComposeResult:
+        with Container(id="workflow-create-container"):
+            yield Label("Create Workflow", id="workflow-create-title")
+            yield Label("Name")
+            yield Input(placeholder="e.g., Daily Research Digest", id="workflow-name-input")
+            yield Label("Description")
+            yield Input(placeholder="Optional description", id="workflow-desc-input")
+            yield Label("Command")
+            yield Input(placeholder="e.g., Perplexity research ... then Slack post ...", id="workflow-command-input")
+            yield Label("Metadata (JSON, optional)")
+            yield Input(placeholder="{\"priority\": \"high\"}", id="workflow-metadata-input")
+            yield Label("", id="workflow-create-error")
+            with Horizontal(id="workflow-create-buttons"):
+                yield Button("Create", id="workflow-create-btn", variant="primary")
+                yield Button("Cancel", id="workflow-cancel-btn")
+
+    def on_mount(self) -> None:
+        self.query_one("#workflow-name-input", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _set_error(self, message: str) -> None:
+        label = self.query_one("#workflow-create-error", Label)
+        label.update(message)
+
+    @on(Button.Pressed, "#workflow-cancel-btn")
+    def _handle_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#workflow-create-btn")
+    async def _handle_create(self) -> None:
+        name = self.query_one("#workflow-name-input", Input).value.strip()
+        description = self.query_one("#workflow-desc-input", Input).value.strip()
+        command = self.query_one("#workflow-command-input", Input).value.strip()
+        metadata_raw = self.query_one("#workflow-metadata-input", Input).value.strip()
+
+        if not name or not command:
+            self._set_error("Name and command are required.")
+            return
+
+        metadata = None
+        if metadata_raw:
+            try:
+                metadata = json.loads(metadata_raw)
+            except Exception:
+                self._set_error("Metadata must be valid JSON.")
+                return
+
+        response = await self.app_ref._authed_request(
+            "POST",
+            "/workflows",
+            json_body={
+                "name": name,
+                "description": description or None,
+                "command": command,
+                "metadata": metadata,
+            },
+        )
+        if response.status_code not in (200, 201):
+            self._set_error(_extract_error_detail(response))
+            return
+        self.dismiss({"refresh": True})
+
+
+class WorkflowScheduleScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, app_ref: "EngramTUI", workflow: Dict[str, Any]):
+        super().__init__()
+        self.app_ref = app_ref
+        self.workflow = workflow
+
+    def compose(self) -> ComposeResult:
+        with Container(id="workflow-schedule-container"):
+            yield Label("Schedule Workflow", id="workflow-schedule-title")
+            yield Label("Interval Minutes")
+            yield Input(placeholder="e.g., 60", id="workflow-interval-input")
+            yield Label("Enabled (yes/no)")
+            yield Input(value="yes", id="workflow-enabled-input")
+            yield Label("", id="workflow-schedule-error")
+            with Horizontal(id="workflow-schedule-buttons"):
+                yield Button("Save", id="workflow-schedule-save-btn", variant="primary")
+                yield Button("Remove", id="workflow-schedule-remove-btn")
+                yield Button("Cancel", id="workflow-schedule-cancel-btn")
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load_schedule(), thread=False)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _set_error(self, message: str) -> None:
+        label = self.query_one("#workflow-schedule-error", Label)
+        label.update(message)
+
+    async def _load_schedule(self) -> None:
+        wf_id = self.workflow.get("id")
+        response = await self.app_ref._authed_request("GET", f"/workflows/{wf_id}/schedule")
+        if response.status_code == 200:
+            schedule = response.json()
+            interval_minutes = int(schedule.get("interval_seconds", 0)) // 60
+            self.query_one("#workflow-interval-input", Input).value = str(interval_minutes)
+            enabled = "yes" if schedule.get("enabled") else "no"
+            self.query_one("#workflow-enabled-input", Input).value = enabled
+
+    @on(Button.Pressed, "#workflow-schedule-cancel-btn")
+    def _handle_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#workflow-schedule-remove-btn")
+    async def _handle_remove(self) -> None:
+        wf_id = self.workflow.get("id")
+        response = await self.app_ref._authed_request("DELETE", f"/workflows/{wf_id}/schedule")
+        if response.status_code != 204:
+            self._set_error(_extract_error_detail(response))
+            return
+        self.dismiss({"refresh": True})
+
+    @on(Button.Pressed, "#workflow-schedule-save-btn")
+    async def _handle_save(self) -> None:
+        wf_id = self.workflow.get("id")
+        interval_raw = self.query_one("#workflow-interval-input", Input).value.strip()
+        enabled_raw = self.query_one("#workflow-enabled-input", Input).value.strip().lower()
+        if not interval_raw.isdigit():
+            self._set_error("Interval must be a positive integer.")
+            return
+        interval_minutes = int(interval_raw)
+        if interval_minutes <= 0:
+            self._set_error("Interval must be greater than zero.")
+            return
+        enabled = enabled_raw in ("yes", "true", "1", "y")
+        response = await self.app_ref._authed_request(
+            "POST",
+            f"/workflows/{wf_id}/schedule",
+            json_body={"interval_minutes": interval_minutes, "enabled": enabled},
+        )
+        if response.status_code != 200:
+            self._set_error(_extract_error_detail(response))
+            return
+        self.dismiss({"refresh": True})
+
+
+class WorkflowRunsScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("r", "refresh", "Refresh"),
+    ]
+
+    def __init__(self, app_ref: "EngramTUI", workflow: Dict[str, Any]):
+        super().__init__()
+        self.app_ref = app_ref
+        self.workflow = workflow
+
+    def compose(self) -> ComposeResult:
+        with Container(id="workflow-runs-container"):
+            yield Label("Workflow Runs", id="workflow-runs-title")
+            yield ListView(id="workflow-runs-list")
+            with Horizontal(id="workflow-runs-buttons"):
+                yield Button("Refresh", id="workflow-runs-refresh-btn")
+                yield Button("Close", id="workflow-runs-close-btn")
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load_runs(), thread=False)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def action_refresh(self) -> None:
+        self.run_worker(self._load_runs(), thread=False)
+
+    async def _load_runs(self) -> None:
+        list_view = self.query_one("#workflow-runs-list", ListView)
+        list_view.clear()
+        wf_id = self.workflow.get("id")
+        response = await self.app_ref._authed_request("GET", f"/workflows/{wf_id}/tasks?limit=20")
+        if response.status_code != 200:
+            list_view.append(ListItem(Label(f"Error: {_extract_error_detail(response)}")))
+            return
+        rows = response.json()
+        if not rows:
+            list_view.append(ListItem(Label("No runs yet.")))
+            return
+        for row in rows:
+            line = f"{row.get('id')} | {row.get('status')} | {row.get('updated_at')}"
+            list_view.append(ListItem(Label(line)))
+
+    @on(Button.Pressed, "#workflow-runs-refresh-btn")
+    def _handle_refresh(self) -> None:
+        self.run_worker(self._load_runs(), thread=False)
+
+    @on(Button.Pressed, "#workflow-runs-close-btn")
+    def _handle_close(self) -> None:
+        self.dismiss(None)
+
 # ASCII header
 LOGO = """
   [bold orange1]______ _   _  _____ _____            __  __ [/]
@@ -531,6 +854,32 @@ class EngramTUI(App):
         margin-top: 1;
     }
 
+    #workflow-container, #workflow-create-container, #workflow-schedule-container, #workflow-runs-container {
+        width: 80%;
+        height: auto;
+        padding: 2 3;
+        border: solid #d35400;
+        background: #1a1e26;
+        margin: 2 auto;
+    }
+
+    #workflow-title, #workflow-create-title, #workflow-schedule-title, #workflow-runs-title {
+        content-align: center middle;
+        text-style: bold;
+        color: #d35400;
+        margin-bottom: 1;
+    }
+
+    #workflow-buttons, #workflow-create-buttons, #workflow-schedule-buttons, #workflow-runs-buttons {
+        margin-top: 1;
+        height: auto;
+    }
+
+    #workflow-create-error, #workflow-schedule-error {
+        color: #e74c3c;
+        margin-top: 1;
+    }
+
     #services-panel {
         margin-top: 1;
         border-top: solid #2c3e50;
@@ -560,6 +909,7 @@ class EngramTUI(App):
         Binding("c", "clear", "Clear Logs", show=True),
         Binding("r", "refresh", "Refresh Stats", show=True),
         Binding("s", "services", "Services", show=True),
+        Binding("w", "workflows", "Workflows", show=True),
     ]
 
     def __init__(self):
@@ -932,6 +1282,14 @@ class EngramTUI(App):
             log_view.write("Ã¢ÂÂ¹Ã¯Â¸Â [bold yellow]Agents:[/] No active agent connections yet.")
         elif cmd == "/services":
             self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
+        elif cmd == "/workflows":
+            self.push_screen(WorkflowListScreen(self))
+        elif cmd.startswith("/tasks"):
+            parts = cmd.split()
+            limit = 10
+            if len(parts) > 1 and parts[1].isdigit():
+                limit = int(parts[1])
+            self.run_worker(self._list_tasks(limit), thread=False)
         elif cmd.startswith("/connect"):
             parts = cmd.split()
             if len(parts) < 2:
@@ -954,6 +1312,9 @@ class EngramTUI(App):
 
     def action_services(self) -> None:
         self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
+
+    def action_workflows(self) -> None:
+        self.push_screen(WorkflowListScreen(self))
 
     def _handle_auth_result(self, result: Optional[Dict[str, Any]]) -> None:
         if not result:
@@ -1107,6 +1468,20 @@ class EngramTUI(App):
                 else:
                     log_view.write("[dim]No workflow results recorded yet.[/]")
                 break
+
+    async def _list_tasks(self, limit: int = 10) -> None:
+        log_view = self.query_one("#log-view", RichLog)
+        response = await self._authed_request("GET", f"/tasks?limit={limit}")
+        if response.status_code != 200:
+            log_view.write(f"[bold red]Task list failed:[/] {_extract_error_detail(response)}")
+            return
+        rows = response.json()
+        if not rows:
+            log_view.write("[dim]No tasks found.[/]")
+            return
+        log_view.write("[bold]Recent Tasks:[/]")
+        for row in rows:
+            log_view.write(f"{row.get('id')} | {row.get('status')} | {row.get('updated_at')}")
 
     def _set_service_status(self, provider_id: str, status: str, connected: bool) -> None:
         label = self.query_one(f"#service-status-{provider_id}", Label)

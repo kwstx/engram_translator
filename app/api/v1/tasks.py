@@ -27,6 +27,7 @@ class TaskSubmitResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     id: uuid.UUID
+    workflow_id: Optional[uuid.UUID] = None
     status: str
     created_at: datetime
     updated_at: datetime

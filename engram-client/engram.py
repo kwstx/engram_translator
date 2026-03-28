@@ -241,6 +241,32 @@ def _render_task_results(results: Optional[Dict[str, Any]]) -> None:
         syntax = Syntax(json.dumps(output, indent=2), "json", theme="monokai", line_numbers=False)
         console.print(syntax)
 
+def _render_workflow_table(workflows: List[Dict[str, Any]]) -> None:
+    table = Table(title="Workflows")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Active")
+    table.add_column("Updated")
+    for wf in workflows:
+        table.add_row(
+            str(wf.get("id")),
+            str(wf.get("name")),
+            "YES" if wf.get("is_active") else "NO",
+            str(wf.get("updated_at")),
+        )
+    console.print(table)
+
+def _render_workflow_detail(workflow: Dict[str, Any]) -> None:
+    table = Table(title="Workflow Detail", show_header=False)
+    table.add_row("ID", str(workflow.get("id")))
+    table.add_row("Name", str(workflow.get("name")))
+    table.add_row("Description", str(workflow.get("description") or ""))
+    table.add_row("Active", "YES" if workflow.get("is_active") else "NO")
+    table.add_row("Updated", str(workflow.get("updated_at")))
+    table.add_row("Last Run", str(workflow.get("last_run_at") or ""))
+    table.add_row("Command", str(workflow.get("command") or ""))
+    console.print(table)
+
 class ExecutionTraceState:
     def __init__(self, max_lines: int = 8):
         self.connections = deque(maxlen=max_lines)
@@ -674,6 +700,319 @@ def tasks(limit: int):
         console.print(table)
 
     asyncio.run(do_list())
+
+@cli.group()
+def workflow():
+    """Create, manage, and run workflows."""
+    pass
+
+@workflow.command("list")
+@click.option("--limit", default=50, show_default=True, help="Max workflows to list.")
+def list_workflows(limit: int):
+    config = load_config()
+
+    async def do_list():
+        response = await _authed_request(
+            config,
+            "GET",
+            f"/workflows?limit={limit}",
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        _render_workflow_table(response.json())
+
+    asyncio.run(do_list())
+
+@workflow.command("show")
+@click.argument("workflow_id")
+def show_workflow(workflow_id: str):
+    config = load_config()
+
+    async def do_show():
+        response = await _authed_request(
+            config,
+            "GET",
+            f"/workflows/{workflow_id}",
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        _render_workflow_detail(response.json())
+
+    asyncio.run(do_show())
+
+@workflow.command("create")
+@click.option("--name", prompt=True, help="Workflow name")
+@click.option("--description", default="", help="Workflow description")
+@click.option("--command", prompt=True, help="Workflow command")
+@click.option("--metadata", default="", help="Optional metadata JSON")
+def create_workflow(name: str, description: str, command: str, metadata: str):
+    config = load_config()
+
+    async def do_create():
+        metadata_obj = None
+        if metadata:
+            try:
+                metadata_obj = json.loads(metadata)
+            except Exception:
+                console.print("[red]ERROR[/] Metadata must be valid JSON.")
+                return
+        response = await _authed_request(
+            config,
+            "POST",
+            "/workflows",
+            json_body={
+                "name": name,
+                "description": description or None,
+                "command": command,
+                "metadata": metadata_obj,
+            },
+        )
+        if response.status_code not in (200, 201):
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        console.print("[green]OK[/] Workflow created.")
+        _render_workflow_detail(response.json())
+
+    asyncio.run(do_create())
+
+@workflow.command("update")
+@click.argument("workflow_id")
+@click.option("--name", default=None, help="Workflow name")
+@click.option("--description", default=None, help="Workflow description")
+@click.option("--command", default=None, help="Workflow command")
+@click.option("--metadata", default=None, help="Optional metadata JSON")
+@click.option("--active/--inactive", default=None, help="Enable/disable workflow")
+def update_workflow(workflow_id: str, name: Optional[str], description: Optional[str], command: Optional[str], metadata: Optional[str], active: Optional[bool]):
+    config = load_config()
+
+    async def do_update():
+        metadata_obj = None
+        if metadata is not None:
+            if metadata == "":
+                metadata_obj = {}
+            else:
+                try:
+                    metadata_obj = json.loads(metadata)
+                except Exception:
+                    console.print("[red]ERROR[/] Metadata must be valid JSON.")
+                    return
+        payload = {}
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+        if command is not None:
+            payload["command"] = command
+        if metadata is not None:
+            payload["metadata"] = metadata_obj
+        if active is not None:
+            payload["is_active"] = active
+        if not payload:
+            console.print("[yellow]No updates supplied.[/]")
+            return
+        response = await _authed_request(
+            config,
+            "PATCH",
+            f"/workflows/{workflow_id}",
+            json_body=payload,
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        console.print("[green]OK[/] Workflow updated.")
+        _render_workflow_detail(response.json())
+
+    asyncio.run(do_update())
+
+@workflow.command("delete")
+@click.argument("workflow_id")
+def delete_workflow(workflow_id: str):
+    config = load_config()
+
+    async def do_delete():
+        response = await _authed_request(
+            config,
+            "DELETE",
+            f"/workflows/{workflow_id}",
+        )
+        if response.status_code != 204:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        console.print("[green]OK[/] Workflow deleted.")
+
+    asyncio.run(do_delete())
+
+@workflow.command("run")
+@click.argument("workflow_id")
+@click.option("--wait/--no-wait", default=True, help="Wait for task completion.")
+@click.option("--poll-seconds", default=2.0, type=float, show_default=True, help="Polling interval.")
+def run_workflow(workflow_id: str, wait: bool, poll_seconds: float):
+    config = load_config()
+
+    async def do_run():
+        response = await _authed_request(
+            config,
+            "POST",
+            f"/workflows/{workflow_id}/run",
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        payload = response.json()
+        task_id = payload.get("task_id")
+        console.print(Panel(
+            f"[bold green]Workflow queued:[/] {workflow_id}\n"
+            f"[bold cyan]Task ID:[/] {task_id}\n"
+            f"[bold]Status:[/] {payload.get('status')}",
+            title="Workflow Submitted",
+            border_style="green",
+        ))
+
+        if not wait or not task_id:
+            return
+
+        trace_state = ExecutionTraceState()
+        events_supported = True
+        last_status = None
+        status = payload.get("status") or "PENDING"
+        with Live(_render_trace_view(trace_state, str(task_id), status), refresh_per_second=4) as live:
+            while True:
+                await asyncio.sleep(poll_seconds)
+
+                if events_supported:
+                    events_path = f"/tasks/{task_id}/events"
+                    if trace_state.last_ts:
+                        events_path += f"?since={trace_state.last_ts}"
+                    events_resp = await _authed_request(
+                        config,
+                        "GET",
+                        events_path,
+                        timeout=30.0,
+                        allow_retry=False,
+                    )
+                    if events_resp.status_code == 200:
+                        for event in events_resp.json():
+                            trace_state.add_event(event)
+                    elif events_resp.status_code in (404, 422):
+                        events_supported = False
+                    else:
+                        console.print(f"[yellow]WARN[/] Event stream unavailable: {events_resp.text}")
+
+                status_resp = await _authed_request(
+                    config,
+                    "GET",
+                    f"/tasks/{task_id}",
+                )
+                if status_resp.status_code != 200:
+                    console.print(f"[red]ERROR[/] Status check failed: {status_resp.text}")
+                    return
+                task_status = status_resp.json()
+                status = task_status.get("status")
+                if status != last_status:
+                    last_status = status
+                    console.print(f"[dim]Status[/]: {status}")
+
+                live.update(_render_trace_view(trace_state, str(task_id), status))
+
+                if status in ("COMPLETED", "DEAD_LETTER"):
+                    console.print(Panel(
+                        f"[bold]Final Status:[/] {status}",
+                        title="Workflow Complete",
+                        border_style="green" if status == "COMPLETED" else "red",
+                    ))
+                    if task_status.get("last_error"):
+                        console.print(Panel(
+                            task_status["last_error"],
+                            title="Last Error",
+                            border_style="red",
+                        ))
+                    _render_task_results(task_status.get("results"))
+                    break
+
+    asyncio.run(do_run())
+
+@workflow.command("runs")
+@click.argument("workflow_id")
+@click.option("--limit", default=20, show_default=True, help="Max runs to list.")
+def list_workflow_runs(workflow_id: str, limit: int):
+    config = load_config()
+
+    async def do_runs():
+        response = await _authed_request(
+            config,
+            "GET",
+            f"/workflows/{workflow_id}/tasks?limit={limit}",
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        rows = response.json()
+        table = Table(title="Workflow Runs")
+        table.add_column("Task ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Updated")
+        for row in rows:
+            table.add_row(
+                str(row.get("id")),
+                str(row.get("status")),
+                str(row.get("updated_at")),
+            )
+        console.print(table)
+
+    asyncio.run(do_runs())
+
+@workflow.command("schedule")
+@click.argument("workflow_id")
+@click.option("--interval-minutes", type=int, default=None, help="Run every N minutes.")
+@click.option("--interval-seconds", type=int, default=None, help="Run every N seconds.")
+@click.option("--enabled/--disabled", default=True, show_default=True, help="Enable schedule.")
+def schedule_workflow(workflow_id: str, interval_minutes: Optional[int], interval_seconds: Optional[int], enabled: bool):
+    config = load_config()
+
+    async def do_schedule():
+        response = await _authed_request(
+            config,
+            "POST",
+            f"/workflows/{workflow_id}/schedule",
+            json_body={
+                "interval_minutes": interval_minutes,
+                "interval_seconds": interval_seconds,
+                "enabled": enabled,
+            },
+        )
+        if response.status_code != 200:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        payload = response.json()
+        console.print(Panel(
+            f"[bold]Interval (sec):[/] {payload.get('interval_seconds')}\n"
+            f"[bold]Enabled:[/] {payload.get('enabled')}\n"
+            f"[bold]Next Run:[/] {payload.get('next_run_at')}",
+            title="Workflow Schedule",
+            border_style="orange1",
+        ))
+
+    asyncio.run(do_schedule())
+
+@workflow.command("unschedule")
+@click.argument("workflow_id")
+def unschedule_workflow(workflow_id: str):
+    config = load_config()
+
+    async def do_unschedule():
+        response = await _authed_request(
+            config,
+            "DELETE",
+            f"/workflows/{workflow_id}/schedule",
+        )
+        if response.status_code != 204:
+            console.print(f"[red]ERROR[/] {response.text}")
+            return
+        console.print("[green]OK[/] Workflow schedule removed.")
+
+    asyncio.run(do_unschedule())
 
 if __name__ == "__main__":
     cli()

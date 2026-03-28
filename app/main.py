@@ -31,12 +31,14 @@ from app.api.v1 import (
     credentials,
     orchestration,
     tasks,
+    workflows,
 )
 from bridge.memory import router as memory_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import init_db
 from app.services.task_worker import TaskWorker
+from app.services.workflow_scheduler import WorkflowScheduler
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -47,12 +49,14 @@ logger = structlog.get_logger(__name__)
 
 discovery_service = DiscoveryService()
 task_worker = TaskWorker()
+workflow_scheduler = WorkflowScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Store services in app state for access from routers
     app.state.discovery_service = discovery_service
     app.state.task_worker = task_worker
+    app.state.workflow_scheduler = workflow_scheduler
     
     # Initialize DB (create tables if they don't exist)
     await init_db()
@@ -60,6 +64,7 @@ async def lifespan(app: FastAPI):
     # Auto-start background services (Orchestration Loop)
     await discovery_service.start_periodic_discovery()
     await task_worker.start()
+    await workflow_scheduler.start()
     logger.info("Engram orchestration services started automatically via lifespan.")
     
     yield
@@ -67,6 +72,7 @@ async def lifespan(app: FastAPI):
     # Graceful shutdown
     await discovery_service.stop_periodic_discovery()
     await task_worker.stop()
+    await workflow_scheduler.stop()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -129,6 +135,7 @@ app.include_router(permissions.router, prefix=settings.API_V1_STR + "/permission
 app.include_router(credentials.router, prefix=settings.API_V1_STR + "/credentials", tags=["Credentials"])
 app.include_router(orchestration.router, prefix=settings.API_V1_STR, tags=["Orchestration"])
 app.include_router(tasks.router, prefix=settings.API_V1_STR + "/tasks", tags=["Tasks"])
+app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows"])
 app.include_router(memory_router, prefix=settings.API_V1_STR)
 
 if __name__ == "__main__":

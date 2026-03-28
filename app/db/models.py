@@ -115,6 +115,10 @@ class Task(SQLModel, table=True):
     __tablename__ = "tasks"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    workflow_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("workflows.id"), index=True, nullable=True)
+    )
     user_id: Optional[uuid.UUID] = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=True)
@@ -159,6 +163,62 @@ class Task(SQLModel, table=True):
     dead_lettered_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True)),
+    )
+
+class Workflow(SQLModel, table=True):
+    __tablename__ = "workflows"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    )
+    name: str = Field(index=True, nullable=False)
+    description: Optional[str] = Field(default=None)
+    definition: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    eat: Optional[str] = Field(default=None)
+    is_active: bool = Field(default=True)
+    last_run_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
+    )
+
+class WorkflowSchedule(SQLModel, table=True):
+    __tablename__ = "workflow_schedules"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    workflow_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("workflows.id"), index=True, nullable=False)
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    )
+    interval_seconds: int = Field(default=3600, nullable=False)
+    enabled: bool = Field(default=True)
+    next_run_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True, nullable=False),
+    )
+    last_run_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
     )
 
 class TaskEvent(SQLModel, table=True):

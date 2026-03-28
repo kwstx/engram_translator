@@ -64,10 +64,13 @@ async def init_db():
             User,
             PermissionProfile,
             ProviderCredential,
+            Workflow,
+            WorkflowSchedule,
         )
         await conn.run_sync(SQLModel.metadata.create_all)
         if engine.dialect.name == "postgresql":
             await _ensure_timestamptz(conn)
+            await _ensure_workflow_columns(conn)
 
 
 async def _ensure_timestamptz(conn) -> None:
@@ -82,6 +85,8 @@ async def _ensure_timestamptz(conn) -> None:
         "users": ["created_at", "updated_at"],
         "permission_profiles": ["created_at", "updated_at"],
         "provider_credentials": ["created_at", "updated_at"],
+        "workflows": ["created_at", "updated_at", "last_run_at"],
+        "workflow_schedules": ["created_at", "updated_at", "next_run_at", "last_run_at"],
     }
 
     for table, cols in columns.items():
@@ -107,3 +112,21 @@ async def _ensure_timestamptz(conn) -> None:
                         f"USING timezone('UTC', {col})"
                     )
                 )
+
+
+async def _ensure_workflow_columns(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE tasks
+            ADD COLUMN IF NOT EXISTS workflow_id UUID
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tasks_workflow_id ON tasks (workflow_id)
+            """
+        )
+    )
