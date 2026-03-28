@@ -75,7 +75,13 @@ def _decrypt_config(token: str) -> Dict[str, Any]:
     return json.loads(payload.decode("utf-8"))
 
 def _default_config() -> Dict[str, Any]:
-    return {"base_url": DEFAULT_BASE_URL, "token": None, "eat": None, "email": None}
+    return {
+        "base_url": DEFAULT_BASE_URL, 
+        "token": None, 
+        "eat": None, 
+        "email": None,
+        "vault": {} # { "base_url|email": { "provider_id": { ... } } }
+    }
 
 def _normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     base = _default_config()
@@ -329,21 +335,69 @@ async def _connect_provider(config: Dict[str, Any], provider: Dict[str, Any]) ->
     if not token:
         console.print("[red]ERROR[/] No token provided.")
         return False
+    
     credential_type = "API_KEY" if provider.get("auth") == "api_key" else "OAUTH_TOKEN"
+    metadata = {
+        "display_name": provider.get("name"),
+        "flow": provider.get("auth"),
+        "source": "cli_vault"
+    }
+    
     payload = {
         "provider_name": provider.get("id"),
         "credential_type": credential_type,
         "token": token,
-        "credential_metadata": {
-            "display_name": provider.get("name"),
-            "flow": provider.get("auth"),
-        },
+        "metadata": metadata,
     }
+    
     response = await _authed_request(config, "POST", "/credentials", json_body=payload)
     if response.status_code not in (200, 201):
         console.print(f"[red]ERROR[/] Connection failed: {_extract_error_detail(response)}")
         return False
-    console.print(f"[green]Connected[/] {display_name} credential saved.")
+        
+    # Save to local vault for future persistence
+    if "vault" not in config:
+        config["vault"] = {}
+    vault_key = f"{config['base_url']}|{config['email']}"
+    if vault_key not in config["vault"]:
+        config["vault"][vault_key] = {}
+        
+    config["vault"][vault_key][provider["id"]] = {
+        "token": token,
+        "type": credential_type,
+        "metadata": metadata,
+        "last_synced": datetime.now().isoformat()
+    }
+    save_config(config)
+    
+    console.print(f"[green]Connected[/] {display_name} credential saved to backend and local vault.")
+    return True
+
+async def _connect_provider_from_vault(config: Dict[str, Any], provider: Dict[str, Any], vault_entry: Dict[str, Any]) -> bool:
+    """Re-applies a local vault credential to the current backend session."""
+    display_name = provider.get("name", provider.get("id", "Provider"))
+    payload = {
+        "provider_name": provider.get("id"),
+        "credential_type": vault_entry["type"],
+        "token": vault_entry["token"],
+        "metadata": vault_entry.get("metadata") or {},
+    }
+    # Update source to indicate vault sync
+    if "metadata" in payload:
+        payload["metadata"]["sync_from"] = "local_vault"
+        payload["metadata"]["sync_at"] = datetime.now().isoformat()
+
+    response = await _authed_request(config, "POST", "/credentials", json_body=payload)
+    if response.status_code not in (200, 201):
+        console.print(f"[yellow]WARN[/] Persistent sync for {display_name} failed: {_extract_error_detail(response)}")
+        return False
+    
+    # Update last_synced in vault
+    vault_key = f"{config['base_url']}|{config['email']}"
+    config["vault"][vault_key][provider["id"]]["last_synced"] = datetime.now().isoformat()
+    save_config(config)
+    
+    console.print(f"[bold green]Auto-Connected[/] {display_name} from local vault.")
     return True
 
 async def _ensure_required_providers_connected(config: Dict[str, Any], command: str) -> bool:
@@ -355,7 +409,23 @@ async def _ensure_required_providers_connected(config: Dict[str, Any], command: 
         return False
 
     missing = [provider for provider in required if provider.get("id") not in connected]
+    if not missing:
+        return True
+
+    # Try local vault first
+    vault_key = f"{config.get('base_url')}|{config.get('email')}"
+    vault = config.get("vault", {}).get(vault_key, {})
+    
+    still_missing = []
     for provider in missing:
+        provider_id = provider.get("id")
+        if provider_id in vault:
+            if await _connect_provider_from_vault(config, provider, vault[provider_id]):
+                connected.add(provider_id)
+                continue
+        still_missing.append(provider)
+
+    for provider in still_missing:
         display_name = provider.get("name", provider.get("id", "Provider"))
         proceed = click.confirm(
             f"Task requires {display_name} but it is not connected. Connect now?",
@@ -806,6 +876,67 @@ def tasks(limit: int):
         console.print(table)
 
     asyncio.run(do_list())
+
+@cli.group()
+def vault():
+    """Manage local credential vault."""
+    pass
+
+@vault.command(name="list")
+def vault_list():
+    """List all credentials stored in the local vault."""
+    config = load_config()
+    vault = config.get("vault", {})
+    if not vault:
+        console.print("[dim]Local vault is empty.[/]")
+        return
+        
+    table = Table(title="Local Credential Vault")
+    table.add_column("Context (Base URL | Email)", style="cyan")
+    table.add_column("Provider")
+    table.add_column("Type")
+    table.add_column("Last Synced")
+    
+    for context, providers in vault.items():
+        for pid, data in providers.items():
+            table.add_row(
+                context,
+                pid,
+                data.get("type", "UNKNOWN"),
+                data.get("last_synced", "Never")
+            )
+    console.print(table)
+
+@vault.command(name="clear")
+@click.option("--all", is_flag=True, help="Clear ALL credentials from the local vault.")
+@click.option("--provider", help="Clear credentials for a specific provider.")
+def vault_clear(all, provider):
+    """Clear credentials from the local vault."""
+    config = load_config()
+    if all:
+        if click.confirm("Are you sure you want to clear the entire local vault?", abort=True):
+            config["vault"] = {}
+            save_config(config)
+            console.print("[green]OK[/] Local vault cleared.")
+            return
+
+    vault_key = f"{config.get('base_url')}|{config.get('email')}"
+    if vault_key not in config.get("vault", {}):
+        console.print("[yellow]No vault entries for current session.[/]")
+        return
+
+    if provider:
+        if provider in config["vault"][vault_key]:
+            del config["vault"][vault_key][provider]
+            save_config(config)
+            console.print(f"[green]OK[/] Cleared {provider} for current session.")
+        else:
+            console.print(f"[red]Error[/] Provider '{provider}' not found in vault.")
+    else:
+        if click.confirm(f"Clear all credentials for {vault_key}?", abort=True):
+            del config["vault"][vault_key]
+            save_config(config)
+            console.print(f"[green]OK[/] Cleared credentials for current session.")
 
 @cli.group()
 def workflow():

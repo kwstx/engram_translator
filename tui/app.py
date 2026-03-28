@@ -12,6 +12,7 @@ import time
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 from app.core.tui_bridge import tui_event_queue
+from tui.vault_service import VaultService
 
 CONFIG_DIR = os.path.expanduser("~/.engram")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
@@ -92,7 +93,13 @@ def _decrypt_config(token: str) -> Dict[str, Any]:
     return json.loads(payload.decode("utf-8"))
 
 def _default_config() -> Dict[str, Any]:
-    return {"base_url": DEFAULT_BASE_URL, "token": None, "eat": None, "email": None}
+    return {
+        "base_url": DEFAULT_BASE_URL, 
+        "token": None, 
+        "eat": None, 
+        "email": None,
+        "vault": {} 
+    }
 
 def _normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     base = _default_config()
@@ -351,6 +358,13 @@ class ServiceConnectScreen(Screen):
         if response.status_code not in (200, 201):
             self._set_error(_extract_error_detail(response))
             return
+
+        # NEW: Store in local vault
+        VaultService.store_credential(app.base_url, app.user_email, provider_name, {
+            "token": token,
+            "type": credential_type,
+            "metadata": payload["metadata"]
+        })
 
         self.dismiss({"provider_name": provider_name})
 
@@ -1323,8 +1337,27 @@ class EngramTUI(App):
                     self._open_service_connect(provider_id)
                 else:
                     self._open_service_connect("custom", custom_name=provider_id)
+        elif cmd.startswith("/vault"):
+            parts = cmd.split()
+            if len(parts) == 1 or parts[1] == "list":
+                vault = VaultService.list_credentials(self.base_url, self.user_email)
+                if not vault:
+                    log_view.write("[dim]Local vault is empty for current session.[/]")
+                else:
+                    log_view.write("[bold yellow]Local Vault Contents:[/]")
+                    for pid, data in vault.items():
+                        log_view.write(f"  - {pid}: {data.get('type')} (Synced: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data.get('last_synced', 0)))})")
+            elif parts[1] == "clear":
+                if len(parts) > 2 and parts[2] == "all":
+                    VaultService.clear_vault()
+                    log_view.write("[green]OK:[/] Entire local vault cleared.")
+                else:
+                    VaultService.clear_vault(self.base_url, self.user_email)
+                    log_view.write(f"[green]OK:[/] Vault cleared for session.")
+            else:
+                log_view.write("[yellow]Usage:[/] /vault [list|clear|clear all]")
         elif cmd.startswith("/"):
-            log_view.write(f"Ã¢ÂÂ Ã¯Â¸Â Unknown command: [dim]{cmd}[/]")
+            log_view.write(f"Ã¢ÂšÂ Ã¯Â¸Â  Unknown command: [dim]{cmd}[/]")
         else:
             self.run_worker(self._run_task_command(cmd), thread=False)
             
@@ -1448,18 +1481,55 @@ class EngramTUI(App):
         self.push_screen(ServiceConnectScreen(provider), _handle_result)
         return await future
 
+    async def _connect_provider_from_vault(self, provider: Dict[str, Any], vault_entry: Dict[str, Any]) -> bool:
+        """Re-applies a local vault credential to the current backend session."""
+        log_view = self.query_one("#log-view", RichLog)
+        display_name = provider.get("name", provider.get("id", "Provider"))
+        payload = {
+            "provider_name": provider.get("id"),
+            "credential_type": vault_entry["type"],
+            "token": vault_entry["token"],
+            "metadata": vault_entry.get("metadata") or {},
+        }
+        if "metadata" in payload:
+            payload["metadata"]["sync_from"] = "tui_vault"
+            payload["metadata"]["sync_at"] = time.time()
+
+        response = await self._authed_request("POST", "/credentials", json_body=payload)
+        if response.status_code not in (200, 201):
+            log_view.write(f"[bold yellow]Vault sync failed for {display_name}:[/] {_extract_error_detail(response)}")
+            return False
+            
+        log_view.write(f"[bold green]Auto-Connected:[/] {display_name} from local vault.")
+        return True
+
     async def _ensure_required_providers_connected(self, command: str, log_view: RichLog) -> bool:
         required = _infer_required_providers(command)
         if not required:
             return True
 
-        connected = await self._get_connected_providers()
-        if connected is None:
+        connected_set = await self._get_connected_providers()
+        if connected_set is None:
             log_view.write("[bold red]Unable to check connected providers. Please login again.[/]")
             return False
 
-        missing = [provider for provider in required if provider.get("id") not in connected]
+        missing = [provider for provider in required if provider.get("id") not in connected_set]
+        if not missing:
+            return True
+            
+        # Try local vault first
+        vault = VaultService.list_credentials(self.base_url, self.user_email)
+        
+        still_missing = []
         for provider in missing:
+            provider_id = provider.get("id")
+            if provider_id in vault:
+                if await self._connect_provider_from_vault(provider, vault[provider_id]):
+                    connected_set.add(provider_id)
+                    continue
+            still_missing.append(provider)
+
+        for provider in still_missing:
             display_name = provider.get("name", provider.get("id", "Provider"))
             log_view.write(f"[bold yellow]Connection required:[/] {display_name}")
             result = await self._prompt_connect_provider(provider)

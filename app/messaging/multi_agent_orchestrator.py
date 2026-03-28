@@ -108,6 +108,7 @@ class MultiAgentOrchestrator:
         await _emit(
             "agent.plan.created",
             f"📋 [bold cyan]Orchestration Plan:[/] Split into {len(plan)} agent steps.",
+            data={"step_count": len(plan)},
         )
 
         results = {}
@@ -134,6 +135,7 @@ class MultiAgentOrchestrator:
                 await _emit(
                     "agent.step.start",
                     f"🔄 [yellow]Step {i+1} (Att {attempt+1}):[/] Handing off to [bold]{agent_name}[/]",
+                    data={"step": i + 1, "attempt": attempt + 1, "agent": agent_name},
                 )
                 step_start_time = time.time()
                 try:
@@ -201,10 +203,12 @@ class MultiAgentOrchestrator:
                     await _emit(
                         "agent.step.complete",
                         f"✅ [green]Step {i+1} OK:[/] [bold]{agent_name}[/] finished.",
+                        data={"step": i + 1, "agent": agent_name},
                     )
                     await _emit(
                         "response.received",
                         f"[green]{agent_name}[/] response captured.",
+                        data={"agent": agent_name, "step": i + 1},
                     )
                     
                     if db and db_task:
@@ -223,6 +227,7 @@ class MultiAgentOrchestrator:
                     await _emit(
                         "agent.step.auth_error",
                         f"🔑 [bold red]Auth Error:[/] Token for {agent_name} expired. Please refresh credentials.",
+                        data={"agent": agent_name, "step": i + 1},
                     )
                     return {"status": "error", "error": "token_expired", "action_required": "REFRESH_CREDENTIALS", "detail": str(e)}
                 
@@ -231,6 +236,7 @@ class MultiAgentOrchestrator:
                     await _emit(
                         "agent.step.auth_error",
                         f"🚫 [bold red]Auth Error:[/] Invalid credentials for {agent_name}.",
+                        data={"agent": agent_name, "step": i + 1},
                     )
                     return {"status": "error", "error": "invalid_credentials", "detail": str(e)}
 
@@ -244,6 +250,7 @@ class MultiAgentOrchestrator:
                         await _emit(
                             "agent.step.failed",
                             f"⏳ [red]Step {i+1} failed after retries:[/] {agent_name} is currently unavailable.",
+                            data={"agent": agent_name, "step": i + 1},
                         )
                 
                 except Exception as e:
@@ -251,6 +258,7 @@ class MultiAgentOrchestrator:
                     await _emit(
                         "agent.step.failed",
                         f"❌ [red]Orchestration aborted at {agent_name}:[/] Permanent error: {str(e)}",
+                        data={"agent": agent_name, "step": i + 1},
                     )
                     err_data = {
                         "status": "error",
@@ -288,6 +296,7 @@ class MultiAgentOrchestrator:
         await _emit(
             "agent.plan.complete",
             f"🏁 [bold green]Complex task synchronized successfully.[/]",
+            data={"agents": list(results.keys()), "step_count": len(plan)},
         )
         
         final_res = {
