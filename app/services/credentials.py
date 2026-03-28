@@ -4,11 +4,16 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.db.models import ProviderCredential, CredentialType
-from app.core.crypto import CryptoService
+import structlog
+from app.core.logging import bind_context
+
+logger = structlog.get_logger(__name__)
 
 class CredentialService:
     @staticmethod
     async def get_credentials(db: AsyncSession, user_id: UUID) -> List[ProviderCredential]:
+        bind_context(user_id=str(user_id))
+        logger.info("Retrieving user credentials")
         statement = select(ProviderCredential).where(ProviderCredential.user_id == user_id)
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -33,12 +38,15 @@ class CredentialService:
         expires_at: Optional[datetime] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> ProviderCredential:
+        bind_context(user_id=str(user_id), provider=provider_name)
+        logger.info("Saving provider credential", provider=provider_name)
         encrypted_token = CryptoService.encrypt(token)
         encrypted_refresh_token = CryptoService.encrypt(refresh_token) if refresh_token else None
         
         # Check if already exists for this user/provider
         existing = await CredentialService.get_credential_by_provider(db, user_id, provider_name)
         if existing:
+            logger.info("Updating existing credential")
             existing.encrypted_token = encrypted_token
             existing.encrypted_refresh_token = encrypted_refresh_token
             existing.expires_at = expires_at
@@ -50,6 +58,7 @@ class CredentialService:
             await db.refresh(existing)
             return existing
         
+        logger.info("Creating new credential")
         new_cred = ProviderCredential(
             user_id=user_id,
             provider_name=provider_name,
@@ -69,18 +78,24 @@ class CredentialService:
         """
         Retrieves the access token, automatically refreshing it if expired.
         """
+        bind_context(user_id=str(user_id), provider=provider_name)
         cred = await CredentialService.get_credential_by_provider(db, user_id, provider_name)
         if not cred:
+            logger.debug("No credential found for provider")
             return None
 
         # Check for expiration (with 1-minute buffer)
         from datetime import datetime, timezone, timedelta
         if cred.expires_at and cred.expires_at < datetime.now(timezone.utc) + timedelta(minutes=1):
             if cred.encrypted_refresh_token:
+                logger.info("Token expired, attempting refresh")
                 # Attempt to refresh
                 refreshed = await CredentialService.refresh_oauth_token(db, cred)
                 if refreshed:
+                    logger.info("Token refresh successful")
                     return CryptoService.decrypt(refreshed.encrypted_token)
+                else:
+                    logger.warning("Token refresh failed")
         
         return CryptoService.decrypt(cred.encrypted_token)
 
@@ -132,17 +147,20 @@ class CredentialService:
                 await db.commit()
                 await db.refresh(credential)
                 return credential
-        except Exception:
-            # Log failure - maybe mark credential as invalid
+        except Exception as e:
+            logger.error("OAuth token refresh failed exception", error=str(e), provider=credential.provider_name)
             return None
 
     @staticmethod
     async def delete_credential(db: AsyncSession, user_id: UUID, provider_name: str) -> bool:
+        bind_context(user_id=str(user_id), provider=provider_name)
         cred = await CredentialService.get_credential_by_provider(db, user_id, provider_name)
         if cred:
             await db.delete(cred)
             await db.commit()
+            logger.info("Credential deleted")
             return True
+        logger.warning("Delete attempt for non-existent credential")
         return False
 
     @staticmethod

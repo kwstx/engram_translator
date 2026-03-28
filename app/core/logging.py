@@ -8,8 +8,14 @@ from app.core.config import settings
 
 SENSITIVE_KEYS = {"token", "password", "key", "secret", "authorization", "cookie", "jwt", "auth"}
 
-def _mask_value(val: Any) -> Any:
-    if isinstance(val, str) and len(val) > 8:
+def _mask_value(val: Any, key_name: str = "") -> Any:
+    if not isinstance(val, str):
+        return "********"
+    # Always fully mask passwords and secrets
+    if "password" in key_name.lower() or "secret" in key_name.lower():
+        return "********"
+    # Partial mask for others if they are long enough
+    if len(val) > 8:
         return f"{val[:4]}...{val[-4:]}"
     return "********"
 
@@ -20,7 +26,7 @@ def _sanitize(obj: Any) -> Any:
         for key, value in obj.items():
             key_str = str(key)
             if any(sk in key_str.lower() for sk in SENSITIVE_KEYS):
-                sanitized[key] = _mask_value(value)
+                sanitized[key] = _mask_value(value, key_str)
             else:
                 sanitized[key] = _sanitize(value)
         return sanitized
