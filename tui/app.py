@@ -24,18 +24,21 @@ PROVIDERS = [
         "name": "Claude",
         "auth": "api_key",
         "hint": "Anthropic API key",
+        "aliases": ["claude", "anthropic"],
     },
     {
         "id": "perplexity",
         "name": "Perplexity",
         "auth": "api_key",
         "hint": "Perplexity API key",
+        "aliases": ["perplexity", "pplx"],
     },
     {
         "id": "slack",
         "name": "Slack",
         "auth": "oauth",
         "hint": "Slack OAuth token",
+        "aliases": ["slack"],
     },
     {
         "id": "custom",
@@ -47,6 +50,21 @@ PROVIDERS = [
 ]
 
 PROVIDER_MAP = {provider["id"]: provider for provider in PROVIDERS}
+
+def _infer_required_providers(command: str) -> list:
+    text = command.lower()
+    required = {}
+    for provider in PROVIDERS:
+        aliases = provider.get("aliases") or [provider["id"], provider.get("name", "").lower()]
+        if any(alias in text for alias in aliases):
+            required[provider["id"]] = provider
+
+    if ("post" in text or "send" in text) and "slack" in PROVIDER_MAP:
+        required["slack"] = PROVIDER_MAP["slack"]
+    if ("search" in text or "research" in text) and "perplexity" in PROVIDER_MAP:
+        required["perplexity"] = PROVIDER_MAP["perplexity"]
+
+    return list(required.values())
 
 def _ensure_key() -> bytes:
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -445,6 +463,11 @@ class WorkflowListScreen(Screen):
     async def _run_workflow(self, workflow: Dict[str, Any]) -> None:
         log_view = self.app_ref.query_one("#log-view", RichLog)
         wf_id = workflow.get("id")
+        command = workflow.get("command") or ""
+        if command:
+            ok = await self.app_ref._ensure_required_providers_connected(command, log_view)
+            if not ok:
+                return
         response = await self.app_ref._authed_request("POST", f"/workflows/{wf_id}/run")
         if response.status_code != 200:
             log_view.write(f"[bold red]Workflow run failed:[/] {_extract_error_detail(response)}")
@@ -1402,11 +1425,63 @@ class EngramTUI(App):
                 )
         return response
 
+    async def _get_connected_providers(self) -> Optional[set]:
+        eat = await self._ensure_eat()
+        if not eat:
+            return None
+        response = await self._authed_request("GET", "/credentials")
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        connected = {item.get("provider_name", "").lower() for item in payload if item.get("provider_name")}
+        self.connected_providers = connected
+        return connected
+
+    async def _prompt_connect_provider(self, provider: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+
+        def _handle_result(result: Optional[Dict[str, Any]]) -> None:
+            if not future.done():
+                future.set_result(result)
+
+        self.push_screen(ServiceConnectScreen(provider), _handle_result)
+        return await future
+
+    async def _ensure_required_providers_connected(self, command: str, log_view: RichLog) -> bool:
+        required = _infer_required_providers(command)
+        if not required:
+            return True
+
+        connected = await self._get_connected_providers()
+        if connected is None:
+            log_view.write("[bold red]Unable to check connected providers. Please login again.[/]")
+            return False
+
+        missing = [provider for provider in required if provider.get("id") not in connected]
+        for provider in missing:
+            display_name = provider.get("name", provider.get("id", "Provider"))
+            log_view.write(f"[bold yellow]Connection required:[/] {display_name}")
+            result = await self._prompt_connect_provider(provider)
+            if not result or not result.get("provider_name"):
+                log_view.write("[yellow]Connection cancelled. Task aborted.[/]")
+                return False
+            await self.refresh_connected_services(show_log=True)
+            if provider.get("id") not in self.connected_providers:
+                log_view.write(f"[bold red]Connection failed:[/] {display_name} still not connected.")
+                return False
+
+        return True
+
     async def _run_task_command(self, command: str) -> None:
         log_view = self.query_one("#log-view", RichLog)
         eat = await self._ensure_eat()
         if not eat:
             log_view.write("[bold red]Auth required:[/] Please login to continue.")
+            return
+
+        ok = await self._ensure_required_providers_connected(command, log_view)
+        if not ok:
             return
 
         self._reset_task_tracker(command, None)

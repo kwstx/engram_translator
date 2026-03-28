@@ -23,6 +23,32 @@ LEGACY_CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 
+PROVIDERS = [
+    {
+        "id": "claude",
+        "name": "Claude",
+        "auth": "api_key",
+        "hint": "Anthropic API key",
+        "aliases": ["claude", "anthropic"],
+    },
+    {
+        "id": "perplexity",
+        "name": "Perplexity",
+        "auth": "api_key",
+        "hint": "Perplexity API key",
+        "aliases": ["perplexity", "pplx"],
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "auth": "oauth",
+        "hint": "Slack OAuth token",
+        "aliases": ["slack"],
+    },
+]
+
+PROVIDER_MAP = {provider["id"]: provider for provider in PROVIDERS}
+
 def _ensure_key() -> bytes:
     os.makedirs(CONFIG_DIR, exist_ok=True)
     if os.path.exists(KEY_FILE):
@@ -266,6 +292,83 @@ def _render_workflow_detail(workflow: Dict[str, Any]) -> None:
     table.add_row("Last Run", str(workflow.get("last_run_at") or ""))
     table.add_row("Command", str(workflow.get("command") or ""))
     console.print(table)
+
+def _infer_required_providers(command: str) -> List[Dict[str, Any]]:
+    text = command.lower()
+    required: Dict[str, Dict[str, Any]] = {}
+    for provider in PROVIDERS:
+        aliases = provider.get("aliases") or [provider["id"], provider["name"].lower()]
+        if any(alias in text for alias in aliases):
+            required[provider["id"]] = provider
+
+    if ("post" in text or "send" in text) and "slack" in PROVIDER_MAP:
+        required["slack"] = PROVIDER_MAP["slack"]
+    if ("search" in text or "research" in text) and "perplexity" in PROVIDER_MAP:
+        required["perplexity"] = PROVIDER_MAP["perplexity"]
+
+    return list(required.values())
+
+async def _fetch_connected_providers(config: Dict[str, Any]) -> Optional[set]:
+    response = await _authed_request(config, "GET", "/credentials")
+    if response.status_code != 200:
+        console.print(f"[yellow]WARN[/] Credential fetch failed: {_extract_error_detail(response)}")
+        return None
+    payload = response.json()
+    return {item.get("provider_name", "").lower() for item in payload if item.get("provider_name")}
+
+async def _connect_provider(config: Dict[str, Any], provider: Dict[str, Any]) -> bool:
+    display_name = provider.get("name", provider.get("id", "Provider"))
+    auth_label = "API key" if provider.get("auth") == "api_key" else "OAuth token"
+    hint = provider.get("hint", "Paste token")
+    console.print(Panel(
+        f"[bold]Connect {display_name}[/]\n{hint}",
+        title="Provider Connection Required",
+        border_style="yellow",
+    ))
+    token = click.prompt(f"{display_name} {auth_label}", type=str, hide_input=True)
+    if not token:
+        console.print("[red]ERROR[/] No token provided.")
+        return False
+    credential_type = "API_KEY" if provider.get("auth") == "api_key" else "OAUTH_TOKEN"
+    payload = {
+        "provider_name": provider.get("id"),
+        "credential_type": credential_type,
+        "token": token,
+        "credential_metadata": {
+            "display_name": provider.get("name"),
+            "flow": provider.get("auth"),
+        },
+    }
+    response = await _authed_request(config, "POST", "/credentials", json_body=payload)
+    if response.status_code not in (200, 201):
+        console.print(f"[red]ERROR[/] Connection failed: {_extract_error_detail(response)}")
+        return False
+    console.print(f"[green]Connected[/] {display_name} credential saved.")
+    return True
+
+async def _ensure_required_providers_connected(config: Dict[str, Any], command: str) -> bool:
+    required = _infer_required_providers(command)
+    if not required:
+        return True
+    connected = await _fetch_connected_providers(config)
+    if connected is None:
+        return False
+
+    missing = [provider for provider in required if provider.get("id") not in connected]
+    for provider in missing:
+        display_name = provider.get("name", provider.get("id", "Provider"))
+        proceed = click.confirm(
+            f"Task requires {display_name} but it is not connected. Connect now?",
+            default=True,
+        )
+        if not proceed:
+            console.print("[yellow]Connection skipped. Aborting task.[/]")
+            return False
+        if not await _connect_provider(config, provider):
+            return False
+        connected.add(provider.get("id"))
+
+    return True
 
 class ExecutionTraceState:
     def __init__(self, max_lines: int = 8):
@@ -536,6 +639,9 @@ def execute(task_text, wait, poll_seconds):
                 "timestamp": time.time(),
             },
         }
+
+        if not await _ensure_required_providers_connected(config, task):
+            return
 
         with Progress(
             SpinnerColumn(),
@@ -852,6 +958,18 @@ def run_workflow(workflow_id: str, wait: bool, poll_seconds: float):
     config = load_config()
 
     async def do_run():
+        workflow_resp = await _authed_request(
+            config,
+            "GET",
+            f"/workflows/{workflow_id}",
+        )
+        if workflow_resp.status_code != 200:
+            console.print(f"[red]ERROR[/] Workflow lookup failed: {workflow_resp.text}")
+            return
+        workflow_command = workflow_resp.json().get("command", "")
+        if workflow_command:
+            if not await _ensure_required_providers_connected(config, workflow_command):
+                return
         response = await _authed_request(
             config,
             "POST",
