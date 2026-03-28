@@ -8,6 +8,7 @@ import asyncio
 import os
 import json
 import httpx
+import time
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 from app.core.tui_bridge import tui_event_queue
@@ -45,11 +46,16 @@ def _decrypt_config(token: str) -> Dict[str, Any]:
 def _default_config() -> Dict[str, Any]:
     return {"base_url": DEFAULT_BASE_URL, "token": None, "eat": None, "email": None}
 
+def _normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    base = _default_config()
+    base.update(config or {})
+    return base
+
 def load_config() -> Dict[str, Any]:
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
-                return _decrypt_config(f.read().strip())
+                return _normalize_config(_decrypt_config(f.read().strip()))
         except (InvalidToken, json.JSONDecodeError, OSError):
             return _default_config()
     return _default_config()
@@ -76,6 +82,30 @@ def _auth_header(token: Optional[str]) -> Dict[str, str]:
     if not token:
         return {}
     return {"Authorization": f"Bearer {token}"}
+
+def _merge_headers(base: Optional[Dict[str, str]], extra: Optional[Dict[str, str]]) -> Dict[str, str]:
+    merged: Dict[str, str] = {}
+    if base:
+        merged.update(base)
+    if extra:
+        merged.update(extra)
+    return merged
+
+def _extract_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            return str(payload.get("detail") or payload.get("error") or response.text)
+    except Exception:
+        pass
+    return response.text
+
+def _response_indicates_token_issue(response: httpx.Response) -> bool:
+    if response.status_code not in (401, 403):
+        return False
+    detail = _extract_error_detail(response).lower()
+    markers = ("expired", "revoked", "invalid", "unauthorized", "missing", "session")
+    return any(marker in detail for marker in markers)
 
 class AuthScreen(Screen):
     BINDINGS = [
@@ -115,6 +145,7 @@ class AuthScreen(Screen):
             base_url,
             "/auth/login",
             data={"username": email, "password": password},
+            headers=_auth_header(self.config.get("eat")),
         )
         if response.status_code != 200:
             raise RuntimeError(response.json().get("detail", response.text))
@@ -166,6 +197,7 @@ class AuthScreen(Screen):
                 base_url,
                 "/auth/signup",
                 json_body={"email": email, "password": password, "user_metadata": {"source": "tui_client"}},
+                headers=_auth_header(self.config.get("eat")),
             )
             if response.status_code != 201:
                 self._set_error(response.json().get("detail", response.text))
@@ -397,12 +429,6 @@ class EngramTUI(App):
         if not cmd:
             return
 
-        if not self.eat and cmd != "/login":
-            log_view = self.query_one("#log-view", RichLog)
-            log_view.write("[bold red]Auth required:[/] Please login with /login.")
-            self.query_one("#command-input", Input).value = ""
-            return
-            
         log_view = self.query_one("#log-view", RichLog)
         log_view.write(f"[bold cyan]> {cmd}[/]")
         
@@ -426,18 +452,7 @@ class EngramTUI(App):
         elif cmd.startswith("/"):
             log_view.write(f"Ã¢ÂÂ Ã¯Â¸Â Unknown command: [dim]{cmd}[/]")
         else:
-            # Natural Language Delegation
-            from delegation.engine import delegation_engine
-            # Process as an async task to avoid blocking the UI thread
-            async def run_delegation():
-                await delegation_engine.delegate_subtask(
-                    cmd,
-                    source_agent="Engram TUI",
-                    eat=self.eat,
-                )
-
-            # In Textual, we can use run_worker to execute async functions
-            self.run_worker(run_delegation())
+            self.run_worker(self._run_task_command(cmd), thread=False)
             
         self.query_one("#command-input", Input).value = ""
 
@@ -451,6 +466,145 @@ class EngramTUI(App):
         self.token = result.get("token")
         self.eat = result.get("eat")
         self.user_email = result.get("email")
+
+    async def _prompt_reauth(self) -> bool:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+
+        def _handle(result: Optional[Dict[str, Any]]) -> None:
+            if result:
+                self._handle_auth_result(result)
+                future.set_result(True)
+            else:
+                future.set_result(False)
+
+        self.push_screen(AuthScreen(load_config()), _handle)
+        return await future
+
+    async def _ensure_eat(self) -> Optional[str]:
+        if self.eat:
+            return self.eat
+        if not self.token:
+            ok = await self._prompt_reauth()
+            if not ok:
+                return None
+        response = await _request(
+            "POST",
+            self.base_url,
+            "/auth/tokens/generate-eat",
+            headers=_auth_header(self.token),
+        )
+        if response.status_code == 200:
+            self.eat = response.json().get("eat")
+            save_config({
+                "base_url": self.base_url,
+                "token": self.token,
+                "eat": self.eat,
+                "email": self.user_email,
+            })
+            return self.eat
+        if _response_indicates_token_issue(response):
+            ok = await self._prompt_reauth()
+            if ok:
+                return await self._ensure_eat()
+        return None
+
+    async def _authed_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        use_session_token: bool = False,
+        allow_retry: bool = True,
+    ) -> httpx.Response:
+        token = self.token if use_session_token else await self._ensure_eat()
+        request_headers = _merge_headers(headers, _auth_header(token))
+        response = await _request(
+            method,
+            self.base_url,
+            path,
+            json_body=json_body,
+            data=data,
+            headers=request_headers,
+        )
+        if allow_retry and _response_indicates_token_issue(response):
+            if await self._prompt_reauth():
+                token = self.token if use_session_token else await self._ensure_eat()
+                retry_headers = _merge_headers(headers, _auth_header(token))
+                return await _request(
+                    method,
+                    self.base_url,
+                    path,
+                    json_body=json_body,
+                    data=data,
+                    headers=retry_headers,
+                )
+        return response
+
+    async def _run_task_command(self, command: str) -> None:
+        log_view = self.query_one("#log-view", RichLog)
+        eat = await self._ensure_eat()
+        if not eat:
+            log_view.write("[bold red]Auth required:[/] Please login to continue.")
+            return
+
+        request_body = {
+            "command": command,
+            "metadata": {
+                "client": "engram-tui",
+                "timestamp": time.time(),
+            },
+        }
+
+        log_view.write("[dim]Submitting task to Engram backend...[/]")
+        try:
+            response = await self._authed_request(
+                "POST",
+                "/tasks/submit",
+                json_body=request_body,
+            )
+        except Exception as exc:
+            log_view.write(f"[bold red]Submission error:[/] {str(exc)}")
+            return
+        if response.status_code != 200:
+            log_view.write(f"[bold red]Submission failed:[/] {_extract_error_detail(response)}")
+            return
+
+        payload = response.json()
+        task_id = payload.get("task_id")
+        log_view.write(f"[bold green]Task accepted:[/] {task_id}")
+
+        last_status = None
+        while True:
+            await asyncio.sleep(2.0)
+            try:
+                status_resp = await self._authed_request(
+                    "GET",
+                    f"/tasks/{task_id}",
+                )
+            except Exception as exc:
+                log_view.write(f"[bold red]Status check error:[/] {str(exc)}")
+                return
+            if status_resp.status_code != 200:
+                log_view.write(f"[bold red]Status check failed:[/] {_extract_error_detail(status_resp)}")
+                return
+            task_status = status_resp.json()
+            status = task_status.get("status")
+            if status != last_status:
+                last_status = status
+                log_view.write(f"[dim]Status:[/] {status}")
+            if status in ("COMPLETED", "DEAD_LETTER"):
+                if task_status.get("last_error"):
+                    log_view.write(f"[bold red]Last Error:[/] {task_status['last_error']}")
+                results = task_status.get("results")
+                if results:
+                    log_view.write(f"[bold]Results:[/]\n{json.dumps(results, indent=2)}")
+                else:
+                    log_view.write("[dim]No workflow results recorded yet.[/]")
+                break
 
 if __name__ == "__main__":
     from textual import run

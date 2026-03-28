@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, ConfigDict
-from app.core.security import require_scopes
+from app.core.security import require_scopes, get_current_principal, verify_engram_token
 from app.core.metrics import record_translation_error, record_translation_success
 from app.core.config import settings
 from app.services.queue import lease_agent_message
@@ -613,10 +613,24 @@ class DelegateRequest(BaseModel):
     summary="Delegate a subtask via natural language",
     description="Parses a natural language command, detects intent, and routes to a specialized agent.",
 )
-async def delegate_task(request: DelegateRequest):
+async def delegate_task(
+    request: DelegateRequest,
+    principal: Dict[str, Any] = Depends(get_current_principal),
+):
     """
     Delegates a task using the DelegationEngine.
     """
     from delegation.engine import delegation_engine
-    result = await delegation_engine.delegate_subtask(request.command, request.source_agent)
+    eat = principal.get("_raw_token")
+    if not eat:
+        raise HTTPException(status_code=401, detail="Missing Engram Access Token (EAT).")
+    try:
+        verify_engram_token(eat)
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail=f"EAT Verification failed: {str(exc)}")
+    result = await delegation_engine.delegate_subtask(
+        request.command,
+        request.source_agent,
+        eat=eat,
+    )
     return result

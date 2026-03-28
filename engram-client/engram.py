@@ -46,19 +46,25 @@ def _decrypt_config(token: str) -> Dict[str, Any]:
     return json.loads(payload.decode("utf-8"))
 
 def _default_config() -> Dict[str, Any]:
-    return {"base_url": DEFAULT_BASE_URL, "token": None, "eat": None}
+    return {"base_url": DEFAULT_BASE_URL, "token": None, "eat": None, "email": None}
+
+def _normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    base = _default_config()
+    base.update(config or {})
+    return base
 
 def load_config() -> Dict[str, Any]:
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
-                return _decrypt_config(f.read().strip())
+                return _normalize_config(_decrypt_config(f.read().strip()))
         except (InvalidToken, json.JSONDecodeError, OSError) as exc:
             console.print(f"[yellow]WARN[/] Encrypted config could not be read ({exc}). Reinitializing.")
             return _default_config()
     if os.path.exists(LEGACY_CONFIG_FILE):
         with open(LEGACY_CONFIG_FILE, "r") as f:
             legacy = json.load(f)
+        legacy = _normalize_config(legacy)
         save_config(legacy)
         return legacy
     return _default_config()
@@ -68,11 +74,12 @@ def save_config(config: Dict[str, Any]):
     with open(CONFIG_FILE, "w") as f:
         f.write(_encrypt_config(config))
 
-async def check_health(base_url: str) -> bool:
+async def check_health(base_url: str, token: Optional[str] = None) -> bool:
     root_url = base_url.replace("/api/v1", "")
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(root_url)
+            headers = _auth_header(token)
+            response = await client.get(root_url, headers=headers)
             return response.status_code == 200
     except Exception:
         return False
@@ -81,6 +88,30 @@ def _auth_header(token: Optional[str]) -> Dict[str, str]:
     if not token:
         return {}
     return {"Authorization": f"Bearer {token}"}
+
+def _merge_headers(base: Optional[Dict[str, str]], extra: Optional[Dict[str, str]]) -> Dict[str, str]:
+    merged: Dict[str, str] = {}
+    if base:
+        merged.update(base)
+    if extra:
+        merged.update(extra)
+    return merged
+
+def _extract_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            return str(payload.get("detail") or payload.get("error") or response.text)
+    except Exception:
+        pass
+    return response.text
+
+def _response_indicates_token_issue(response: httpx.Response) -> bool:
+    if response.status_code not in (401, 403):
+        return False
+    detail = _extract_error_detail(response).lower()
+    markers = ("expired", "revoked", "invalid", "unauthorized", "missing", "session")
+    return any(marker in detail for marker in markers)
 
 async def _request(
     method: str,
@@ -115,6 +146,88 @@ async def _ensure_eat(config: Dict[str, Any]) -> Optional[str]:
         return eat
     return None
 
+async def _refresh_eat(config: Dict[str, Any]) -> Optional[str]:
+    token = config.get("token")
+    if not token:
+        return None
+    resp = await _request(
+        "POST",
+        config["base_url"],
+        "/auth/tokens/generate-eat",
+        headers=_auth_header(token),
+    )
+    if resp.status_code == 200:
+        eat = resp.json().get("eat")
+        config["eat"] = eat
+        save_config(config)
+        return eat
+    return None
+
+async def _prompt_reauth(config: Dict[str, Any]) -> bool:
+    console.print("[yellow]Session expired or token invalid. Please reauthenticate.[/]")
+    email_default = config.get("email") or ""
+    email = click.prompt("Email", type=str, default=email_default, show_default=bool(email_default))
+    password = click.prompt("Password", type=str, hide_input=True)
+    ok = await _perform_login(config, email, password)
+    return ok
+
+async def _authed_request(
+    config: Dict[str, Any],
+    method: str,
+    path: str,
+    *,
+    json_body: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = 60.0,
+    use_session_token: bool = False,
+    allow_retry: bool = True,
+) -> httpx.Response:
+    token = None
+    if use_session_token:
+        token = config.get("token")
+        if not token:
+            if await _prompt_reauth(config):
+                token = config.get("token")
+    else:
+        token = config.get("eat") or await _ensure_eat(config)
+        if not token:
+            if await _prompt_reauth(config):
+                token = config.get("eat") or await _ensure_eat(config)
+
+    auth_headers = _auth_header(token)
+    request_headers = _merge_headers(headers, auth_headers)
+    response = await _request(
+        method,
+        config["base_url"],
+        path,
+        json_body=json_body,
+        data=data,
+        headers=request_headers,
+        timeout=timeout,
+    )
+
+    if allow_retry and _response_indicates_token_issue(response):
+        refreshed: Optional[str] = None
+        if not use_session_token:
+            refreshed = await _refresh_eat(config)
+        if not refreshed:
+            if await _prompt_reauth(config):
+                refreshed = config.get("eat") or await _ensure_eat(config)
+        if refreshed or (use_session_token and config.get("token")):
+            retry_token = config.get("token") if use_session_token else refreshed
+            retry_headers = _merge_headers(headers, _auth_header(retry_token))
+            return await _request(
+                method,
+                config["base_url"],
+                path,
+                json_body=json_body,
+                data=data,
+                headers=retry_headers,
+                timeout=timeout,
+            )
+    return response
+
 def _render_task_results(results: Optional[Dict[str, Any]]) -> None:
     if not results:
         console.print("[dim]No workflow results recorded yet.[/]")
@@ -139,10 +252,12 @@ async def _perform_login(config: Dict[str, Any], email: str, password: str) -> b
             base_url,
             "/auth/login",
             data={"username": email, "password": password},
+            headers=_auth_header(config.get("eat")),
         )
         if response.status_code == 200:
             data = response.json()
             config["token"] = data["access_token"]
+            config["email"] = email
             save_config(config)
             console.print("[green]OK[/] Login successful.")
 
@@ -174,6 +289,7 @@ async def _perform_signup(config: Dict[str, Any], email: str, password: str) -> 
             base_url,
             "/auth/signup",
             json_body={"email": email, "password": password, "user_metadata": {"source": "cli_client"}},
+            headers=_auth_header(config.get("eat")),
         )
         if response.status_code == 201:
             console.print("[green]OK[/] Account created successfully.")
@@ -256,7 +372,8 @@ def status():
     table.add_row("Base URL", base_url)
 
     async def get_status():
-        is_up = await check_health(base_url)
+        token = config.get("eat") or config.get("token")
+        is_up = await check_health(base_url, token=token)
         table.add_row("Backend Reachable", "[green]YES[/]" if is_up else "[red]NO[/]")
         table.add_row("Session Token", "[green]Active[/]" if config.get("token") else "[yellow]Missing[/]")
         table.add_row("Engram Access Token (EAT)", "[green]Ready[/]" if config.get("eat") else "[yellow]Missing[/]")
@@ -271,16 +388,18 @@ def generate_eat():
     base_url = config["base_url"]
     token = config.get("token")
     if not token:
-        console.print("[red]ERROR[/] Missing session token. Please login first.")
-        return
+        console.print("[yellow]Session token missing. Prompting for login...[/]")
+        if not asyncio.run(_prompt_reauth(config)):
+            console.print("[red]ERROR[/] Login required to generate EAT.")
+            return
 
     async def do_generate():
         try:
-            response = await _request(
+            response = await _authed_request(
+                config,
                 "POST",
-                base_url,
                 "/auth/tokens/generate-eat",
-                headers=_auth_header(token),
+                use_session_token=True,
             )
             if response.status_code == 200:
                 config["eat"] = response.json()["eat"]
@@ -307,11 +426,6 @@ def execute(task_text, wait, poll_seconds):
     base_url = config["base_url"]
 
     async def do_exec():
-        eat = await _ensure_eat(config)
-        if not eat:
-            console.print("[red]ERROR[/] Missing Engram Access Token (EAT). Please login first.")
-            return
-
         request_body = {
             "command": task,
             "metadata": {
@@ -327,12 +441,11 @@ def execute(task_text, wait, poll_seconds):
         ) as progress:
             progress.add_task(description="Submitting task to Engram backend...", total=None)
             try:
-                response = await _request(
+                response = await _authed_request(
+                    config,
                     "POST",
-                    base_url,
                     "/tasks/submit",
                     json_body=request_body,
-                    headers=_auth_header(eat),
                 )
             except Exception as e:
                 console.print(f"[red]ERROR[/] Submission failed: {str(e)}")
@@ -359,7 +472,6 @@ def execute(task_text, wait, poll_seconds):
         if not wait:
             return
 
-        token = config.get("token") or eat
         last_status = None
         with Progress(
             SpinnerColumn(),
@@ -369,11 +481,10 @@ def execute(task_text, wait, poll_seconds):
             progress.add_task(description="Waiting for workflow execution...", total=None)
             while True:
                 await asyncio.sleep(poll_seconds)
-                status_resp = await _request(
+                status_resp = await _authed_request(
+                    config,
                     "GET",
-                    base_url,
                     f"/tasks/{task_id}",
-                    headers=_auth_header(token),
                 )
                 if status_resp.status_code != 200:
                     console.print(f"[red]ERROR[/] Status check failed: {status_resp.text}")
@@ -413,9 +524,9 @@ def delegate(command_text):
 
     async def do_delegate():
         try:
-            response = await _request(
+            response = await _authed_request(
+                config,
                 "POST",
-                base_url,
                 "/delegate",
                 json_body={"command": cmd, "source_agent": "engram-cli"},
             )
@@ -439,17 +550,12 @@ def tasks(limit: int):
     """List recent tasks for the authenticated user."""
     config = load_config()
     base_url = config["base_url"]
-    token = config.get("token") or config.get("eat")
-    if not token:
-        console.print("[red]ERROR[/] Missing token. Please login first.")
-        return
 
     async def do_list():
-        response = await _request(
+        response = await _authed_request(
+            config,
             "GET",
-            base_url,
             "/tasks",
-            headers=_auth_header(token),
             timeout=30.0,
         )
         if response.status_code != 200:
