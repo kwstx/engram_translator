@@ -1,0 +1,21 @@
+#!/bin/bash
+# Engram Single-Command Entry Point for Unix-like systems (Linux, macOS)
+# This script initializes the backend and launches the TUI environment.
+# Usage: ./engram [command]
+
+# Get the directory of this script
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Set PYTHONPATH to the script's directory
+export PYTHONPATH="$DIR"
+
+# Run the Engram CLI
+python3 "$DIR/app/cli.py" "$@"
+
+# Check if it failed
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "[ERROR] Engram failed to start."
+    echo "Please ensure all dependencies are installed: pip install -r requirements.txt"
+    exit 1
+fi

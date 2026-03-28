@@ -17,7 +17,7 @@ from tui.vault_service import VaultService
 CONFIG_DIR = os.path.expanduser("~/.engram")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
-DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
+DEFAULT_BASE_URL = "http://127.0.0.1:8000/api/v1"
 
 PROVIDERS = [
     {
@@ -710,8 +710,26 @@ LOGO = """
 class EngramTUI(App):
     """
     A terminal-based interface for the Engram Protocol Bridge.
-    Heavy design inspiration from Claude Code and Deep Agents.
     """
+    CSS = """
+    """
+    
+    def __init__(self, base_url: Optional[str] = None):
+        super().__init__()
+        self.cli_base_url = base_url
+        self.base_url = None
+        self.token = None
+        self.eat = None
+        self.user_email = None
+        
+        # State trackers
+        self.active_task_id = None
+        self.active_task_text = None
+        self.active_task_status = None
+        self.active_task_total_steps = 0
+        self.active_task_steps = {}
+        self.active_task_agents = set()
+
     CSS = """
     Screen {
         background: #0f1115;
@@ -1050,7 +1068,7 @@ class EngramTUI(App):
         register_tui_loop(asyncio.get_event_loop())
 
         config = load_config()
-        self.base_url = config.get("base_url") or DEFAULT_BASE_URL
+        self.base_url = self.cli_base_url or config.get("base_url") or DEFAULT_BASE_URL
         self.token = config.get("token")
         self.eat = config.get("eat")
         self.user_email = config.get("email")

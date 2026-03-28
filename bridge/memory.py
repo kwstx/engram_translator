@@ -1,4 +1,13 @@
-from pyswip import Prolog
+try:
+    from pyswip import Prolog
+except (ImportError, OSError):
+    # Fallback for environments without SWI-Prolog
+    class Prolog:
+        def consult(self, *args, **kwargs): pass
+        def query(self, *args, **kwargs): return []
+        def assertz(self, *args, **kwargs): pass
+        def retract(self, *args, **kwargs): pass
+
 from owlready2 import get_ontology, World
 from pyDatalog import pyDatalog
 import os

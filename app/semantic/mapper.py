@@ -36,7 +36,9 @@ class SemanticMapper:
         
         try:
             # Owlready2 expects 'file://' prefix for local files
-            self.ontology = self.world.get_ontology(f"file://{abs_path}").load()
+            # On Windows, abspath returns backslashes which must be converted for file:// URLs
+            file_url = f"file://{abs_path.replace(os.sep, '/')}"
+            self.ontology = self.world.get_ontology(file_url).load()
             logger.info(f"Successfully loaded ontology from {abs_path}")
         except Exception as e:
             logger.error(f"Failed to load ontology: {e}")
