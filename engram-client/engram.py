@@ -148,121 +148,6 @@ def _response_indicates_token_issue(response: httpx.Response) -> bool:
     markers = ("expired", "revoked", "invalid", "unauthorized", "missing", "session")
     return any(marker in detail for marker in markers)
 
-async def _request(
-    method: str,
-    base_url: str,
-    path: str,
-    *,
-    json_body: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None,
-    timeout: float = 60.0,
-) -> httpx.Response:
-    url = f"{base_url}{path}"
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        return await client.request(method, url, json=json_body, data=data, headers=headers)
-
-async def _ensure_eat(config: Dict[str, Any]) -> Optional[str]:
-    if config.get("eat"):
-        return config["eat"]
-    token = config.get("token")
-    if not token:
-        return None
-    resp = await _request(
-        "POST",
-        config["base_url"],
-        "/auth/tokens/generate-eat",
-        headers=_auth_header(token),
-    )
-    if resp.status_code == 200:
-        eat = resp.json().get("eat")
-        config["eat"] = eat
-        save_config(config)
-        return eat
-    return None
-
-async def _refresh_eat(config: Dict[str, Any]) -> Optional[str]:
-    token = config.get("token")
-    if not token:
-        return None
-    resp = await _request(
-        "POST",
-        config["base_url"],
-        "/auth/tokens/generate-eat",
-        headers=_auth_header(token),
-    )
-    if resp.status_code == 200:
-        eat = resp.json().get("eat")
-        config["eat"] = eat
-        save_config(config)
-        return eat
-    return None
-
-async def _prompt_reauth(config: Dict[str, Any]) -> bool:
-    console.print("[yellow]Session expired or token invalid. Please reauthenticate.[/]")
-    email_default = config.get("email") or ""
-    email = click.prompt("Email", type=str, default=email_default, show_default=bool(email_default))
-    password = click.prompt("Password", type=str, hide_input=True)
-    ok = await _perform_login(config, email, password)
-    return ok
-
-async def _authed_request(
-    config: Dict[str, Any],
-    method: str,
-    path: str,
-    *,
-    json_body: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None,
-    timeout: float = 60.0,
-    use_session_token: bool = False,
-    allow_retry: bool = True,
-) -> httpx.Response:
-    token = None
-    if use_session_token:
-        token = config.get("token")
-        if not token:
-            if await _prompt_reauth(config):
-                token = config.get("token")
-    else:
-        token = config.get("eat") or await _ensure_eat(config)
-        if not token:
-            if await _prompt_reauth(config):
-                token = config.get("eat") or await _ensure_eat(config)
-
-    auth_headers = _auth_header(token)
-    request_headers = _merge_headers(headers, auth_headers)
-    response = await _request(
-        method,
-        config["base_url"],
-        path,
-        json_body=json_body,
-        data=data,
-        headers=request_headers,
-        timeout=timeout,
-    )
-
-    if allow_retry and _response_indicates_token_issue(response):
-        refreshed: Optional[str] = None
-        if not use_session_token:
-            refreshed = await _refresh_eat(config)
-        if not refreshed:
-            if await _prompt_reauth(config):
-                refreshed = config.get("eat") or await _ensure_eat(config)
-        if refreshed or (use_session_token and config.get("token")):
-            retry_token = config.get("token") if use_session_token else refreshed
-            retry_headers = _merge_headers(headers, _auth_header(retry_token))
-            return await _request(
-                method,
-                config["base_url"],
-                path,
-                json_body=json_body,
-                data=data,
-                headers=retry_headers,
-                timeout=timeout,
-            )
-    return response
-
 def _render_task_results(results: Optional[Dict[str, Any]]) -> None:
     if not results:
         console.print("[dim]No workflow results recorded yet.[/]")
@@ -315,12 +200,13 @@ def _infer_required_providers(command: str) -> List[Dict[str, Any]]:
     return list(required.values())
 
 async def _fetch_connected_providers(config: Dict[str, Any]) -> Optional[set]:
-    response = await _authed_request(config, "GET", "/credentials")
-    if response.status_code != 200:
-        console.print(f"[yellow]WARN[/] Credential fetch failed: {_extract_error_detail(response)}")
-        return None
-    payload = response.json()
-    return {item.get("provider_name", "").lower() for item in payload if item.get("provider_name")}
+    async with Engram() as sdk:
+        response = await sdk.request("GET", "/credentials")
+        if response.status_code != 200:
+            console.print(f"[yellow]WARN[/] Credential fetch failed: {_extract_error_detail(response)}")
+            return None
+        payload = response.json()
+        return {item.get("provider_name", "").lower() for item in payload if item.get("provider_name")}
 
 async def _connect_provider(config: Dict[str, Any], provider: Dict[str, Any]) -> bool:
     display_name = provider.get("name", provider.get("id", "Provider"))
@@ -350,11 +236,12 @@ async def _connect_provider(config: Dict[str, Any], provider: Dict[str, Any]) ->
         "metadata": metadata,
     }
     
-    response = await _authed_request(config, "POST", "/credentials", json_body=payload)
-    if response.status_code not in (200, 201):
-        console.print(f"[red]ERROR[/] Connection failed: {_extract_error_detail(response)}")
-        return False
-        
+    async with Engram() as sdk:
+        response = await sdk.request("POST", "/credentials", json_body=payload)
+        if response.status_code not in (200, 201):
+            console.print(f"[red]ERROR[/] Connection failed: {_extract_error_detail(response)}")
+            return False
+            
     # Save to local vault for future persistence
     if "vault" not in config:
         config["vault"] = {}
@@ -387,10 +274,11 @@ async def _connect_provider_from_vault(config: Dict[str, Any], provider: Dict[st
         payload["metadata"]["sync_from"] = "local_vault"
         payload["metadata"]["sync_at"] = datetime.now().isoformat()
 
-    response = await _authed_request(config, "POST", "/credentials", json_body=payload)
-    if response.status_code not in (200, 201):
-        console.print(f"[yellow]WARN[/] Persistent sync for {display_name} failed: {_extract_error_detail(response)}")
-        return False
+    async with Engram() as sdk:
+        response = await sdk.request("POST", "/credentials", json_body=payload)
+        if response.status_code not in (200, 201):
+            console.print(f"[yellow]WARN[/] Persistent sync for {display_name} failed: {_extract_error_detail(response)}")
+            return False
     
     # Update last_synced in vault
     vault_key = f"{config['base_url']}|{config['email']}"
@@ -520,61 +408,273 @@ def _render_status(config: Dict[str, Any]) -> None:
     table.add_row("Base URL", base_url)
     console.print(Panel(table, title="[bold orange1]ENGRAM CLIENT[/]", border_style="orange1"))
 
-async def _perform_login(config: Dict[str, Any], email: str, password: str) -> bool:
-    base_url = config["base_url"]
-    try:
-        response = await _request(
-            "POST",
-            base_url,
-            "/auth/login",
-            data={"username": email, "password": password},
-            headers=_auth_header(config.get("eat")),
-        )
-        if response.status_code == 200:
-            data = response.json()
-            config["token"] = data["access_token"]
-            config["email"] = email
-            save_config(config)
-            console.print("[green]OK[/] Login successful.")
+class Engram:
+    """
+    Engram SDK Client for interacting with the Engram Protocol Bridge and Identity Server.
+    
+    This client automatically manages authentication session tokens and Engram Access Tokens (EATs).
+    """
 
-            console.print("[dim]Generating Engram Access Token (EAT)...[/]")
-            eat_resp = await _request(
-                "POST",
-                base_url,
-                "/auth/tokens/generate-eat",
-                headers=_auth_header(data["access_token"]),
-            )
-            if eat_resp.status_code == 200:
-                config["eat"] = eat_resp.json()["eat"]
-                save_config(config)
-                console.print("[green]OK[/] EAT generated and stored.")
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        token: Optional[str] = None,
+        eat: Optional[str] = None,
+        interactive: bool = False,
+    ):
+        self._config = load_config()
+        self.base_url = base_url or self._config.get("base_url") or DEFAULT_BASE_URL
+        self.email = email or self._config.get("email")
+        self.password = password
+        self.token = token or self._config.get("token")
+        self.eat = eat or self._config.get("eat")
+        self.interactive = interactive
+        self._client = httpx.AsyncClient(timeout=60.0)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    async def close(self):
+        await self._client.aclose()
+
+    def _save_state(self):
+        """Persists the current auth state to the local config."""
+        self._config.update({
+            "base_url": self.base_url,
+            "email": self.email,
+            "token": self.token,
+            "eat": self.eat,
+        })
+        save_config(self._config)
+
+    async def signup(self, email: str, password: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        """Create a new Engram account."""
+        try:
+            payload = {
+                "email": email, 
+                "password": password, 
+                "user_metadata": metadata or {"source": "python_sdk"}
+            }
+            response = await self._client.post(f"{self.base_url}/auth/signup", json=payload)
+            if response.status_code == 201:
+                if self.interactive:
+                    console.print("[green]OK[/] Account created successfully.")
+                self.email = email
+                return True
+            
+            if self.interactive:
+                console.print(f"[red]ERROR[/] Signup failed: {response.text}")
+            return False
+        except Exception as exc:
+            if self.interactive:
+                console.print(f"[red]ERROR[/] Connection error: {str(exc)}")
+            return False
+
+    async def login(self, email: Optional[str] = None, password: Optional[str] = None) -> bool:
+        """
+        Log in to the Engram Identity Server to obtain a session token.
+        If credentials aren't provided, it uses the ones passed during initialization.
+        """
+        login_email = email or self.email
+        login_password = password or self.password
+
+        if not login_email or not login_password:
+            if self.interactive:
+                login_email = click.prompt("Email", type=str, default=self.email or "")
+                login_password = click.prompt("Password", type=str, hide_input=True)
             else:
-                console.print(f"[yellow]WARN[/] EAT not generated: {eat_resp.text}")
-            return True
-        console.print(f"[red]ERROR[/] Login failed: {response.text}")
-        return False
-    except Exception as exc:
-        console.print(f"[red]ERROR[/] Connection error: {str(exc)}")
-        return False
+                raise ValueError("Email and password are required for login.")
+
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/auth/login",
+                data={"username": login_email, "password": login_password}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.token = data["access_token"]
+                self.email = login_email
+                self._save_state()
+                if self.interactive:
+                    console.print("[green]OK[/] Login successful.")
+                return True
+            
+            if self.interactive:
+                console.print(f"[red]ERROR[/] Login failed: {response.text}")
+            return False
+        except Exception as exc:
+            if self.interactive:
+                console.print(f"[red]ERROR[/] Connection error: {str(exc)}")
+            return False
+
+    async def generate_eat(self, expires_days: int = 30) -> Optional[str]:
+        """
+        Generates a long-lived Engram Access Token (EAT) for tool/agent execution.
+        Requires a valid session token (via login).
+        """
+        if not self.token:
+            if not await self.login():
+                return None
+
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/auth/tokens/generate-eat",
+                headers=_auth_header(self.token),
+                params={"expires_days": expires_days}
+            )
+            if response.status_code == 200:
+                self.eat = response.json().get("eat")
+                self._save_state()
+                if self.interactive:
+                    console.print("[green]OK[/] EAT generated and stored.")
+                return self.eat
+            
+            if self.interactive:
+                console.print(f"[red]ERROR[/] EAT generation failed: {response.text}")
+            return None
+        except Exception as exc:
+            if self.interactive:
+                console.print(f"[red]ERROR[/] Connection error: {str(exc)}")
+            return None
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: float = 60.0,
+        use_session_token: bool = False,
+        allow_retry: bool = True,
+    ) -> httpx.Response:
+        """
+        Makes an authenticated request to the Engram API.
+        Automatically attaches EAT or session token and handles expired tokens.
+        """
+        token = self.token if use_session_token else (self.eat or await self.generate_eat())
+        
+        if not token:
+            # Last ditch effort: try to login if we have creds
+            if self.email and self.password:
+                if await self.login():
+                    token = self.token if use_session_token else await self.generate_eat()
+            
+            if not token and self.interactive:
+                if await self._prompt_reauth():
+                    token = self.token if use_session_token else (self.eat or await self.generate_eat())
+
+        if not token:
+            raise PermissionError("No valid token or EAT available. Please call login().")
+
+        request_headers = _merge_headers(headers, _auth_header(token))
+        url = f"{self.base_url}{path}"
+        
+        response = await self._client.request(
+            method, url, json=json_body, data=data, headers=request_headers, timeout=timeout
+        )
+
+        if allow_retry and _response_indicates_token_issue(response):
+            # Attempt to refresh/reauth
+            refreshed = False
+            if not use_session_token:
+                # EAT might have expired, try to generate a new one with session token
+                if await self.generate_eat():
+                    token = self.eat
+                    refreshed = True
+            
+            if not refreshed:
+                # Session token might have expired, try to login
+                if self.email and self.password:
+                    if await self.login():
+                        token = self.token if use_session_token else await self.generate_eat()
+                        refreshed = True
+                elif self.interactive:
+                    if await self._prompt_reauth():
+                        token = self.token if use_session_token else (self.eat or await self.generate_eat())
+                        refreshed = True
+
+            if refreshed:
+                retry_headers = _merge_headers(headers, _auth_header(token))
+                return await self._client.request(
+                    method, url, json=json_body, data=data, headers=retry_headers, timeout=timeout
+                )
+        
+        return response
+
+    async def _prompt_reauth(self) -> bool:
+        console.print("[yellow]Session expired or token invalid. Please reauthenticate.[/]")
+        return await self.login()
+
+    async def execute(self, command: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Submits a task for execution."""
+        # Check providers if interactive
+        if self.interactive:
+             if not await _ensure_required_providers_connected(self._config, command):
+                 raise RuntimeError("Required provider connection cancelled by user.")
+
+        payload = {
+            "command": command,
+            "metadata": metadata or {"client": "engram-sdk", "timestamp": time.time()}
+        }
+        response = await self.request("POST", "/tasks/submit", json_body=payload)
+        if response.status_code != 200:
+            raise RuntimeError(f"Task submission failed: {response.text}")
+        return response.json()
+
+    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
+        """Retrieves the current status of a task."""
+        response = await self.request("GET", f"/tasks/{task_id}")
+        if response.status_code != 200:
+            raise RuntimeError(f"Task status fetch failed: {response.text}")
+        return response.json()
+
+    async def get_task_events(self, task_id: str, since: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Retrieves execution events for a task."""
+        path = f"/tasks/{task_id}/events"
+        if since:
+            path += f"?since={since}"
+        response = await self.request("GET", path)
+        if response.status_code == 200:
+            return response.json()
+        return []
+
+    async def list_tasks(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Lists recent tasks."""
+        response = await self.request("GET", f"/tasks?limit={limit}")
+        if response.status_code == 200:
+            return response.json()
+        return []
+
+
+async def _perform_login(config: Dict[str, Any], email: str, password: str) -> bool:
+    async with Engram(interactive=True) as sdk:
+        return await sdk.login(email, password)
 
 async def _perform_signup(config: Dict[str, Any], email: str, password: str) -> bool:
-    base_url = config["base_url"]
-    try:
-        response = await _request(
-            "POST",
-            base_url,
-            "/auth/signup",
-            json_body={"email": email, "password": password, "user_metadata": {"source": "cli_client"}},
-            headers=_auth_header(config.get("eat")),
-        )
-        if response.status_code == 201:
-            console.print("[green]OK[/] Account created successfully.")
-            return True
-        console.print(f"[red]ERROR[/] Signup failed: {response.text}")
-        return False
-    except Exception as exc:
-        console.print(f"[red]ERROR[/] Connection error: {str(exc)}")
-        return False
+    async with Engram(interactive=True) as sdk:
+        return await sdk.signup(email, password)
+
+async def _ensure_eat(config: Dict[str, Any]) -> Optional[str]:
+    async with Engram() as sdk:
+        return await sdk.generate_eat()
+
+async def _refresh_eat(config: Dict[str, Any]) -> Optional[str]:
+    async with Engram() as sdk:
+        return await sdk.generate_eat()
+
+async def _authed_request(*args, **kwargs) -> httpx.Response:
+    config = args[0]
+    async with Engram() as sdk:
+        # Map old signature to new SDK method if possible
+        # Or just use the SDK directly in the CLI commands
+        return await sdk.request(args[1], args[2], **kwargs)
 
 def _interactive_auth_flow() -> None:
     config = load_config()
@@ -598,10 +698,9 @@ def _interactive_auth_flow() -> None:
         if confirm != password:
             console.print("[red]ERROR[/] Passwords do not match.")
             return
-        created = asyncio.run(_perform_signup(config, email, password))
-        if not created:
-            return
-    asyncio.run(_perform_login(config, email, password))
+        asyncio.run(_perform_signup(config, email, password))
+    else:
+        asyncio.run(_perform_login(config, email, password))
 
 @click.group(invoke_without_command=True)
 @click.pass_context
@@ -624,8 +723,7 @@ def init(url: str):
 @click.option("--password", prompt=True, hide_input=True, help="User password")
 def login(email, password):
     """Login to the Engram Identity Server."""
-    config = load_config()
-    asyncio.run(_perform_login(config, email, password))
+    asyncio.run(_perform_login(None, email, password))
 
 @cli.command()
 @click.option("--email", prompt=True, help="User email")
@@ -633,10 +731,9 @@ def login(email, password):
 @click.option("--login-after/--no-login-after", default=True, show_default=True, help="Login immediately after signup.")
 def signup(email, password, login_after):
     """Create a new Engram account."""
-    config = load_config()
-    created = asyncio.run(_perform_signup(config, email, password))
+    created = asyncio.run(_perform_signup(None, email, password))
     if created and login_after:
-        asyncio.run(_perform_login(config, email, password))
+        asyncio.run(_perform_login(None, email, password))
 
 @cli.command()
 def status():
@@ -648,44 +745,21 @@ def status():
     table.add_row("Base URL", base_url)
 
     async def get_status():
-        token = config.get("eat") or config.get("token")
-        is_up = await check_health(base_url, token=token)
-        table.add_row("Backend Reachable", "[green]YES[/]" if is_up else "[red]NO[/]")
-        table.add_row("Session Token", "[green]Active[/]" if config.get("token") else "[yellow]Missing[/]")
-        table.add_row("Engram Access Token (EAT)", "[green]Ready[/]" if config.get("eat") else "[yellow]Missing[/]")
-        console.print(Panel(table, title="[bold orange1]ENGRAM CLIENT[/]", border_style="orange1"))
+        async with Engram() as sdk:
+            is_up = await check_health(base_url, token=sdk.eat or sdk.token)
+            table.add_row("Backend Reachable", "[green]YES[/]" if is_up else "[red]NO[/]")
+            table.add_row("Session Token", "[green]Active[/]" if sdk.token else "[yellow]Missing[/]")
+            table.add_row("Engram Access Token (EAT)", "[green]Ready[/]" if sdk.eat else "[yellow]Missing[/]")
+            console.print(Panel(table, title="[bold orange1]ENGRAM CLIENT[/]", border_style="orange1"))
 
     asyncio.run(get_status())
 
 @cli.command(name="eat")
 def generate_eat():
     """Generate a new Engram Access Token (EAT)."""
-    config = load_config()
-    base_url = config["base_url"]
-    token = config.get("token")
-    if not token:
-        console.print("[yellow]Session token missing. Prompting for login...[/]")
-        if not asyncio.run(_prompt_reauth(config)):
-            console.print("[red]ERROR[/] Login required to generate EAT.")
-            return
-
     async def do_generate():
-        try:
-            response = await _authed_request(
-                config,
-                "POST",
-                "/auth/tokens/generate-eat",
-                use_session_token=True,
-            )
-            if response.status_code == 200:
-                config["eat"] = response.json()["eat"]
-                save_config(config)
-                console.print("[green]OK[/] EAT generated and stored.")
-            else:
-                console.print(f"[red]ERROR[/] EAT generation failed: {response.text}")
-        except Exception as e:
-            console.print(f"[red]ERROR[/] Connection error: {str(e)}")
-
+        async with Engram(interactive=True) as sdk:
+            await sdk.generate_eat()
     asyncio.run(do_generate())
 
 @cli.command(name="exec")
@@ -698,117 +772,70 @@ def execute(task_text, wait, poll_seconds):
     if not task:
         task = click.prompt("Enter task")
 
-    config = load_config()
-    base_url = config["base_url"]
-
     async def do_exec():
-        request_body = {
-            "command": task,
-            "metadata": {
-                "client": "engram-cli",
-                "timestamp": time.time(),
-            },
-        }
-
-        if not await _ensure_required_providers_connected(config, task):
-            return
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task_description}"),
-            transient=True,
-        ) as progress:
-            progress.add_task(description="Submitting task to Engram backend...", total=None)
+        async with Engram(interactive=True) as sdk:
             try:
-                response = await _authed_request(
-                    config,
-                    "POST",
-                    "/tasks/submit",
-                    json_body=request_body,
-                )
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task_description}"),
+                    transient=True,
+                ) as progress:
+                    progress.add_task(description="Submitting task to Engram backend...", total=None)
+                    payload = await sdk.execute(task)
             except Exception as e:
                 console.print(f"[red]ERROR[/] Submission failed: {str(e)}")
                 return
 
-        if response.status_code != 200:
+            task_id = payload.get("task_id")
             console.print(Panel(
-                f"[red]Error {response.status_code}: {response.text}[/]",
-                title="Submission Failed",
-                border_style="red",
+                f"[bold green]Submitted:[/] {task_id}\n"
+                f"[bold cyan]Status:[/] {payload.get('status')}\n"
+                f"[bold]Message:[/] {payload.get('message')}",
+                title="Task Accepted",
+                border_style="green",
             ))
-            return
 
-        payload = response.json()
-        task_id = payload.get("task_id")
-        console.print(Panel(
-            f"[bold green]Submitted:[/] {task_id}\n"
-            f"[bold cyan]Status:[/] {payload.get('status')}\n"
-            f"[bold]Message:[/] {payload.get('message')}",
-            title="Task Accepted",
-            border_style="green",
-        ))
+            if not wait:
+                return
 
-        if not wait:
-            return
+            trace_state = ExecutionTraceState()
+            events_supported = True
+            last_status = None
+            status = payload.get("status") or "PENDING"
+            with Live(_render_trace_view(trace_state, str(task_id), status), refresh_per_second=4) as live:
+                while True:
+                    await asyncio.sleep(poll_seconds)
 
-        trace_state = ExecutionTraceState()
-        events_supported = True
-        last_status = None
-        status = payload.get("status") or "PENDING"
-        with Live(_render_trace_view(trace_state, str(task_id), status), refresh_per_second=4) as live:
-            while True:
-                await asyncio.sleep(poll_seconds)
+                    if events_supported:
+                        try:
+                            events = await sdk.get_task_events(task_id, since=trace_state.last_ts)
+                            for event in events:
+                                trace_state.add_event(event)
+                        except Exception:
+                            events_supported = False
 
-                # Fetch execution events (if supported)
-                if events_supported:
-                    events_path = f"/tasks/{task_id}/events"
-                    if trace_state.last_ts:
-                        events_path += f"?since={trace_state.last_ts}"
-                    events_resp = await _authed_request(
-                        config,
-                        "GET",
-                        events_path,
-                        timeout=30.0,
-                        allow_retry=False,
-                    )
-                    if events_resp.status_code == 200:
-                        for event in events_resp.json():
-                            trace_state.add_event(event)
-                    elif events_resp.status_code in (404, 422):
-                        events_supported = False
-                    else:
-                        console.print(f"[yellow]WARN[/] Event stream unavailable: {events_resp.text}")
+                    try:
+                        task_status = await sdk.get_task_status(task_id)
+                        status = task_status.get("status")
+                        if status != last_status:
+                            last_status = status
+                            console.print(f"[dim]Status[/]: {status}")
 
-                status_resp = await _authed_request(
-                    config,
-                    "GET",
-                    f"/tasks/{task_id}",
-                )
-                if status_resp.status_code != 200:
-                    console.print(f"[red]ERROR[/] Status check failed: {status_resp.text}")
-                    return
-                task_status = status_resp.json()
-                status = task_status.get("status")
-                if status != last_status:
-                    last_status = status
-                    console.print(f"[dim]Status[/]: {status}")
+                        live.update(_render_trace_view(trace_state, str(task_id), status))
 
-                live.update(_render_trace_view(trace_state, str(task_id), status))
-
-                if status in ("COMPLETED", "DEAD_LETTER"):
-                    console.print(Panel(
-                        f"[bold]Final Status:[/] {status}",
-                        title="Workflow Complete",
-                        border_style="green" if status == "COMPLETED" else "red",
-                    ))
-                    if task_status.get("last_error"):
-                        console.print(Panel(
-                            task_status["last_error"],
-                            title="Last Error",
-                            border_style="red",
-                        ))
-                    _render_task_results(task_status.get("results"))
-                    break
+                        if status in ("COMPLETED", "DEAD_LETTER"):
+                            console.print(Panel(
+                                f"[bold]Final Status:[/] {status}",
+                                title="Workflow Complete",
+                                border_style="green" if status == "COMPLETED" else "red",
+                            ))
+                            if task_status.get("last_error"):
+                                console.print(Panel(task_status["last_error"], title="Last Error", border_style="red"))
+                            _render_task_results(task_status.get("results"))
+                            break
+                    except Exception as e:
+                        console.print(f"[red]ERROR[/] Status check failed: {str(e)}")
+                        return
 
     asyncio.run(do_exec())
 
@@ -820,28 +847,16 @@ def delegate(command_text):
     if not cmd:
         cmd = click.prompt("Enter command")
 
-    config = load_config()
-    base_url = config["base_url"]
-
     async def do_delegate():
-        try:
-            response = await _authed_request(
-                config,
-                "POST",
-                "/delegate",
-                json_body={"command": cmd, "source_agent": "engram-cli"},
-            )
-            if response.status_code == 200:
-                result = response.json()
-                console.print(Panel(
-                    f"[bold]Delegation Result:[/]\n{json.dumps(result, indent=2)}",
-                    title="Delegation Response",
-                    border_style="blue",
-                ))
-            else:
-                console.print(f"[red]Error: {response.text}[/]")
-        except Exception as e:
-            console.print(f"[red]Connection error: {str(e)}[/]")
+        async with Engram() as sdk:
+            try:
+                response = await sdk.request("POST", "/delegate", json_body={"command": cmd, "source_agent": "engram-cli"})
+                if response.status_code == 200:
+                    console.print(Panel(json.dumps(response.json(), indent=2), title="Delegation Response", border_style="blue"))
+                else:
+                    console.print(f"[red]Error: {response.text}[/]")
+            except Exception as e:
+                console.print(f"[red]Connection error: {str(e)}[/]")
 
     asyncio.run(do_delegate())
 
@@ -849,31 +864,19 @@ def delegate(command_text):
 @click.option("--limit", default=10, show_default=True, help="Max tasks to list.")
 def tasks(limit: int):
     """List recent tasks for the authenticated user."""
-    config = load_config()
-    base_url = config["base_url"]
-
     async def do_list():
-        response = await _authed_request(
-            config,
-            "GET",
-            "/tasks",
-            timeout=30.0,
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        rows: List[Dict[str, Any]] = response.json()
-        table = Table(title="Recent Tasks")
-        table.add_column("Task ID", style="cyan")
-        table.add_column("Status")
-        table.add_column("Updated")
-        for row in rows[:limit]:
-            table.add_row(
-                str(row.get("id")),
-                str(row.get("status")),
-                str(row.get("updated_at")),
-            )
-        console.print(table)
+        async with Engram() as sdk:
+            try:
+                rows = await sdk.list_tasks(limit=limit)
+                table = Table(title="Recent Tasks")
+                table.add_column("Task ID", style="cyan")
+                table.add_column("Status")
+                table.add_column("Updated")
+                for row in rows:
+                    table.add_row(str(row.get("id")), str(row.get("status")), str(row.get("updated_at")))
+                console.print(table)
+            except Exception as e:
+                console.print(f"[red]ERROR[/] {str(e)}")
 
     asyncio.run(do_list())
 
@@ -890,21 +893,14 @@ def vault_list():
     if not vault:
         console.print("[dim]Local vault is empty.[/]")
         return
-        
     table = Table(title="Local Credential Vault")
     table.add_column("Context (Base URL | Email)", style="cyan")
     table.add_column("Provider")
     table.add_column("Type")
     table.add_column("Last Synced")
-    
     for context, providers in vault.items():
         for pid, data in providers.items():
-            table.add_row(
-                context,
-                pid,
-                data.get("type", "UNKNOWN"),
-                data.get("last_synced", "Never")
-            )
+            table.add_row(context, pid, data.get("type", "UNKNOWN"), data.get("last_synced", "Never"))
     console.print(table)
 
 @vault.command(name="clear")
@@ -919,12 +915,10 @@ def vault_clear(all, provider):
             save_config(config)
             console.print("[green]OK[/] Local vault cleared.")
             return
-
     vault_key = f"{config.get('base_url')}|{config.get('email')}"
     if vault_key not in config.get("vault", {}):
         console.print("[yellow]No vault entries for current session.[/]")
         return
-
     if provider:
         if provider in config["vault"][vault_key]:
             del config["vault"][vault_key][provider]
@@ -946,37 +940,25 @@ def workflow():
 @workflow.command("list")
 @click.option("--limit", default=50, show_default=True, help="Max workflows to list.")
 def list_workflows(limit: int):
-    config = load_config()
-
     async def do_list():
-        response = await _authed_request(
-            config,
-            "GET",
-            f"/workflows?limit={limit}",
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        _render_workflow_table(response.json())
-
+        async with Engram() as sdk:
+            response = await sdk.request("GET", f"/workflows?limit={limit}")
+            if response.status_code == 200:
+                _render_workflow_table(response.json())
+            else:
+                console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_list())
 
 @workflow.command("show")
 @click.argument("workflow_id")
 def show_workflow(workflow_id: str):
-    config = load_config()
-
     async def do_show():
-        response = await _authed_request(
-            config,
-            "GET",
-            f"/workflows/{workflow_id}",
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        _render_workflow_detail(response.json())
-
+        async with Engram() as sdk:
+            response = await sdk.request("GET", f"/workflows/{workflow_id}")
+            if response.status_code == 200:
+                _render_workflow_detail(response.json())
+            else:
+                console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_show())
 
 @workflow.command("create")
@@ -985,33 +967,20 @@ def show_workflow(workflow_id: str):
 @click.option("--command", prompt=True, help="Workflow command")
 @click.option("--metadata", default="", help="Optional metadata JSON")
 def create_workflow(name: str, description: str, command: str, metadata: str):
-    config = load_config()
-
     async def do_create():
-        metadata_obj = None
-        if metadata:
-            try:
-                metadata_obj = json.loads(metadata)
-            except Exception:
-                console.print("[red]ERROR[/] Metadata must be valid JSON.")
-                return
-        response = await _authed_request(
-            config,
-            "POST",
-            "/workflows",
-            json_body={
-                "name": name,
-                "description": description or None,
-                "command": command,
-                "metadata": metadata_obj,
-            },
-        )
-        if response.status_code not in (200, 201):
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        console.print("[green]OK[/] Workflow created.")
-        _render_workflow_detail(response.json())
-
+        async with Engram() as sdk:
+            metadata_obj = None
+            if metadata:
+                try: metadata_obj = json.loads(metadata)
+                except Exception:
+                    console.print("[red]ERROR[/] Metadata must be valid JSON.")
+                    return
+            response = await sdk.request("POST", "/workflows", json_body={"name": name, "description": description or None, "command": command, "metadata": metadata_obj})
+            if response.status_code in (200, 201):
+                console.print("[green]OK[/] Workflow created.")
+                _render_workflow_detail(response.json())
+            else:
+                console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_create())
 
 @workflow.command("update")
@@ -1022,63 +991,39 @@ def create_workflow(name: str, description: str, command: str, metadata: str):
 @click.option("--metadata", default=None, help="Optional metadata JSON")
 @click.option("--active/--inactive", default=None, help="Enable/disable workflow")
 def update_workflow(workflow_id: str, name: Optional[str], description: Optional[str], command: Optional[str], metadata: Optional[str], active: Optional[bool]):
-    config = load_config()
-
     async def do_update():
-        metadata_obj = None
-        if metadata is not None:
-            if metadata == "":
-                metadata_obj = {}
+        async with Engram() as sdk:
+            payload = {}
+            if name is not None: payload["name"] = name
+            if description is not None: payload["description"] = description
+            if command is not None: payload["command"] = command
+            if active is not None: payload["is_active"] = active
+            if metadata is not None:
+                if metadata == "": payload["metadata"] = {}
+                else:
+                    try: payload["metadata"] = json.loads(metadata)
+                    except Exception:
+                        console.print("[red]ERROR[/] Metadata must be valid JSON.")
+                        return
+            if not payload:
+                console.print("[yellow]No updates supplied.[/]")
+                return
+            response = await sdk.request("PATCH", f"/workflows/{workflow_id}", json_body=payload)
+            if response.status_code == 200:
+                console.print("[green]OK[/] Workflow updated.")
+                _render_workflow_detail(response.json())
             else:
-                try:
-                    metadata_obj = json.loads(metadata)
-                except Exception:
-                    console.print("[red]ERROR[/] Metadata must be valid JSON.")
-                    return
-        payload = {}
-        if name is not None:
-            payload["name"] = name
-        if description is not None:
-            payload["description"] = description
-        if command is not None:
-            payload["command"] = command
-        if metadata is not None:
-            payload["metadata"] = metadata_obj
-        if active is not None:
-            payload["is_active"] = active
-        if not payload:
-            console.print("[yellow]No updates supplied.[/]")
-            return
-        response = await _authed_request(
-            config,
-            "PATCH",
-            f"/workflows/{workflow_id}",
-            json_body=payload,
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        console.print("[green]OK[/] Workflow updated.")
-        _render_workflow_detail(response.json())
-
+                console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_update())
 
 @workflow.command("delete")
 @click.argument("workflow_id")
 def delete_workflow(workflow_id: str):
-    config = load_config()
-
     async def do_delete():
-        response = await _authed_request(
-            config,
-            "DELETE",
-            f"/workflows/{workflow_id}",
-        )
-        if response.status_code != 204:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        console.print("[green]OK[/] Workflow deleted.")
-
+        async with Engram() as sdk:
+            response = await sdk.request("DELETE", f"/workflows/{workflow_id}")
+            if response.status_code == 204: console.print("[green]OK[/] Workflow deleted.")
+            else: console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_delete())
 
 @workflow.command("run")
@@ -1086,130 +1031,65 @@ def delete_workflow(workflow_id: str):
 @click.option("--wait/--no-wait", default=True, help="Wait for task completion.")
 @click.option("--poll-seconds", default=2.0, type=float, show_default=True, help="Polling interval.")
 def run_workflow(workflow_id: str, wait: bool, poll_seconds: float):
-    config = load_config()
-
     async def do_run():
-        workflow_resp = await _authed_request(
-            config,
-            "GET",
-            f"/workflows/{workflow_id}",
-        )
-        if workflow_resp.status_code != 200:
-            console.print(f"[red]ERROR[/] Workflow lookup failed: {workflow_resp.text}")
-            return
-        workflow_command = workflow_resp.json().get("command", "")
-        if workflow_command:
-            if not await _ensure_required_providers_connected(config, workflow_command):
+        async with Engram(interactive=True) as sdk:
+            wf_resp = await sdk.request("GET", f"/workflows/{workflow_id}")
+            if wf_resp.status_code != 200:
+                console.print(f"[red]ERROR[/] Workflow lookup failed: {wf_resp.text}")
                 return
-        response = await _authed_request(
-            config,
-            "POST",
-            f"/workflows/{workflow_id}/run",
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        payload = response.json()
-        task_id = payload.get("task_id")
-        console.print(Panel(
-            f"[bold green]Workflow queued:[/] {workflow_id}\n"
-            f"[bold cyan]Task ID:[/] {task_id}\n"
-            f"[bold]Status:[/] {payload.get('status')}",
-            title="Workflow Submitted",
-            border_style="green",
-        ))
-
-        if not wait or not task_id:
-            return
-
-        trace_state = ExecutionTraceState()
-        events_supported = True
-        last_status = None
-        status = payload.get("status") or "PENDING"
-        with Live(_render_trace_view(trace_state, str(task_id), status), refresh_per_second=4) as live:
-            while True:
-                await asyncio.sleep(poll_seconds)
-
-                if events_supported:
-                    events_path = f"/tasks/{task_id}/events"
-                    if trace_state.last_ts:
-                        events_path += f"?since={trace_state.last_ts}"
-                    events_resp = await _authed_request(
-                        config,
-                        "GET",
-                        events_path,
-                        timeout=30.0,
-                        allow_retry=False,
-                    )
-                    if events_resp.status_code == 200:
-                        for event in events_resp.json():
-                            trace_state.add_event(event)
-                    elif events_resp.status_code in (404, 422):
-                        events_supported = False
-                    else:
-                        console.print(f"[yellow]WARN[/] Event stream unavailable: {events_resp.text}")
-
-                status_resp = await _authed_request(
-                    config,
-                    "GET",
-                    f"/tasks/{task_id}",
-                )
-                if status_resp.status_code != 200:
-                    console.print(f"[red]ERROR[/] Status check failed: {status_resp.text}")
-                    return
-                task_status = status_resp.json()
-                status = task_status.get("status")
-                if status != last_status:
-                    last_status = status
-                    console.print(f"[dim]Status[/]: {status}")
-
-                live.update(_render_trace_view(trace_state, str(task_id), status))
-
-                if status in ("COMPLETED", "DEAD_LETTER"):
-                    console.print(Panel(
-                        f"[bold]Final Status:[/] {status}",
-                        title="Workflow Complete",
-                        border_style="green" if status == "COMPLETED" else "red",
-                    ))
-                    if task_status.get("last_error"):
-                        console.print(Panel(
-                            task_status["last_error"],
-                            title="Last Error",
-                            border_style="red",
-                        ))
-                    _render_task_results(task_status.get("results"))
-                    break
-
+            cmd = wf_resp.json().get("command", "")
+            if cmd:
+                 # Logic for provider check is inside execute but here we need to do it manually if we use request
+                 if not await _ensure_required_providers_connected(sdk._config, cmd):
+                     return
+            response = await sdk.request("POST", f"/workflows/{workflow_id}/run")
+            if response.status_code != 200:
+                console.print(f"[red]ERROR[/] {response.text}")
+                return
+            payload = response.json()
+            task_id = payload.get("task_id")
+            console.print(Panel(f"Task ID: {task_id}", title="Workflow Submitted", border_style="green"))
+            if not wait or not task_id: return
+            trace_state = ExecutionTraceState()
+            events_supported = True
+            last_status = None
+            with Live(_render_trace_view(trace_state, str(task_id), "PENDING"), refresh_per_second=4) as live:
+                while True:
+                    await asyncio.sleep(poll_seconds)
+                    if events_supported:
+                        try:
+                            events = await sdk.get_task_events(task_id, since=trace_state.last_ts)
+                            for event in events: trace_state.add_event(event)
+                        except Exception: events_supported = False
+                    try:
+                        task_status = await sdk.get_task_status(task_id)
+                        status = task_status.get("status")
+                        if status != last_status:
+                            last_status = status
+                        live.update(_render_trace_view(trace_state, str(task_id), status))
+                        if status in ("COMPLETED", "DEAD_LETTER"):
+                            console.print(Panel(f"Final Status: {status}", title="Workflow Complete"))
+                            _render_task_results(task_status.get("results"))
+                            break
+                    except Exception as e:
+                        console.print(f"[red]ERROR[/] {str(e)}")
+                        return
     asyncio.run(do_run())
 
 @workflow.command("runs")
 @click.argument("workflow_id")
 @click.option("--limit", default=20, show_default=True, help="Max runs to list.")
 def list_workflow_runs(workflow_id: str, limit: int):
-    config = load_config()
-
     async def do_runs():
-        response = await _authed_request(
-            config,
-            "GET",
-            f"/workflows/{workflow_id}/tasks?limit={limit}",
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        rows = response.json()
-        table = Table(title="Workflow Runs")
-        table.add_column("Task ID", style="cyan")
-        table.add_column("Status")
-        table.add_column("Updated")
-        for row in rows:
-            table.add_row(
-                str(row.get("id")),
-                str(row.get("status")),
-                str(row.get("updated_at")),
-            )
-        console.print(table)
-
+        async with Engram() as sdk:
+            response = await sdk.request("GET", f"/workflows/{workflow_id}/tasks?limit={limit}")
+            if response.status_code == 200:
+                rows = response.json()
+                table = Table(title="Workflow Runs")
+                table.add_column("Task ID", style="cyan"); table.add_column("Status"); table.add_column("Updated")
+                for row in rows: table.add_row(str(row.get("id")), str(row.get("status")), str(row.get("updated_at")))
+                console.print(table)
+            else: console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_runs())
 
 @workflow.command("schedule")
@@ -1218,49 +1098,23 @@ def list_workflow_runs(workflow_id: str, limit: int):
 @click.option("--interval-seconds", type=int, default=None, help="Run every N seconds.")
 @click.option("--enabled/--disabled", default=True, show_default=True, help="Enable schedule.")
 def schedule_workflow(workflow_id: str, interval_minutes: Optional[int], interval_seconds: Optional[int], enabled: bool):
-    config = load_config()
-
     async def do_schedule():
-        response = await _authed_request(
-            config,
-            "POST",
-            f"/workflows/{workflow_id}/schedule",
-            json_body={
-                "interval_minutes": interval_minutes,
-                "interval_seconds": interval_seconds,
-                "enabled": enabled,
-            },
-        )
-        if response.status_code != 200:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        payload = response.json()
-        console.print(Panel(
-            f"[bold]Interval (sec):[/] {payload.get('interval_seconds')}\n"
-            f"[bold]Enabled:[/] {payload.get('enabled')}\n"
-            f"[bold]Next Run:[/] {payload.get('next_run_at')}",
-            title="Workflow Schedule",
-            border_style="orange1",
-        ))
-
+        async with Engram() as sdk:
+            response = await sdk.request("POST", f"/workflows/{workflow_id}/schedule", json_body={"interval_minutes": interval_minutes, "interval_seconds": interval_seconds, "enabled": enabled})
+            if response.status_code == 200:
+                payload = response.json()
+                console.print(Panel(f"Interval: {payload.get('interval_seconds')}s\nNext: {payload.get('next_run_at')}", title="Workflow Schedule"))
+            else: console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_schedule())
 
 @workflow.command("unschedule")
 @click.argument("workflow_id")
 def unschedule_workflow(workflow_id: str):
-    config = load_config()
-
     async def do_unschedule():
-        response = await _authed_request(
-            config,
-            "DELETE",
-            f"/workflows/{workflow_id}/schedule",
-        )
-        if response.status_code != 204:
-            console.print(f"[red]ERROR[/] {response.text}")
-            return
-        console.print("[green]OK[/] Workflow schedule removed.")
-
+        async with Engram() as sdk:
+            response = await sdk.request("DELETE", f"/workflows/{workflow_id}/schedule")
+            if response.status_code == 204: console.print("[green]OK[/] Workflow schedule removed.")
+            else: console.print(f"[red]ERROR[/] {response.text}")
     asyncio.run(do_unschedule())
 
 if __name__ == "__main__":
