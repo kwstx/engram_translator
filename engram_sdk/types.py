@@ -38,3 +38,37 @@ class TaskSubmissionResult:
     task_id: str
     status: str
     message: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class MappingSuggestion:
+    source_field: str
+    suggestion: Optional[str] = None
+    confidence: Optional[float] = None
+    applied: bool = False
+
+
+@dataclass(frozen=True)
+class TranslationResponse:
+    status: str
+    message: str
+    payload: Dict[str, Any]
+    mapping_suggestions: List[MappingSuggestion] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TaskExecution:
+    message_id: str
+    task_id: str
+    payload: Dict[str, Any]
+    leased_until: datetime
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskResponse:
+    status: str
+    output: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
+    protocol: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)

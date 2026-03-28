@@ -5,9 +5,11 @@ from typing import Any, Dict, Iterable, List, Optional
 from .auth import AuthClient
 from .communication import EngramTransport
 from .exceptions import EngramSDKError
+from .execution import TaskExecutor
 from .tasks import TaskClient
 from .tools import ToolRegistry
-from .types import TaskLease, ToolDefinition
+from .translation import TranslationClient
+from .types import TaskLease, ToolDefinition, TranslationResponse
 
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 
@@ -43,6 +45,7 @@ class EngramSDK:
         self.transport.set_auth_handler(self.auth)
         self.tasks = TaskClient(self.transport)
         self.tools = ToolRegistry()
+        self.translation = TranslationClient(self.transport)
 
         self.agent_id = agent_id
         self.endpoint_url = endpoint_url
@@ -142,6 +145,38 @@ class EngramSDK:
         }
         return self.transport.request_json("POST", "/register", json_body=payload, auth=None)
 
+    def translate(
+        self,
+        payload: Dict[str, Any],
+        *,
+        source_protocol: Optional[str] = None,
+        target_protocol: Optional[str] = None,
+        source_agent: Optional[str] = None,
+        target_agent: Optional[str] = None,
+        beta: bool = False,
+    ) -> TranslationResponse:
+        """
+        Translates a protocol-specific payload using the Engram Translation Layer.
+        
+        If source_agent and target_agent are provided, the system retrieves their 
+        preferred protocols from the registry automatically.
+        """
+        if not source_protocol and not source_agent:
+            # Auto-detect source from SDK context
+            if self.supported_protocols:
+                source_protocol = self.supported_protocols[0]
+            elif self.agent_id:
+                source_agent = self.agent_id
+
+        return self.translation.translate(
+            payload,
+            source_protocol=source_protocol,
+            target_protocol=target_protocol,
+            source_agent=source_agent,
+            target_agent=target_agent,
+            beta=beta,
+        )
+
 
     def receive_task(
         self,
@@ -161,10 +196,23 @@ class EngramSDK:
         response_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if response_payload:
-            # Placeholder for future response ingestion endpoints.
-            # For now, responses are acknowledged only.
-            pass
+            return self.tasks.respond_message(
+                message_id,
+                response=response_payload,
+            )
         return self.tasks.ack_message(message_id)
+
+    def task_executor(
+        self,
+        *,
+        agent_id: Optional[str] = None,
+        lease_seconds: Optional[int] = None,
+    ) -> TaskExecutor:
+        return TaskExecutor(
+            self,
+            agent_id=agent_id,
+            lease_seconds=lease_seconds,
+        )
 
     def close(self) -> None:
         self.transport.close()

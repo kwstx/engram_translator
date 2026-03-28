@@ -98,3 +98,16 @@ class TaskClient:
             f"/agents/messages/{message_id}/ack",
             auth=None,
         )
+
+    def respond_message(
+        self,
+        message_id: str,
+        *,
+        response: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self._transport.request_json(
+            "POST",
+            f"/agents/messages/{message_id}/respond",
+            json_body=response,
+            auth=None,
+        )

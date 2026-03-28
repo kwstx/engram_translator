@@ -546,6 +546,22 @@ class AgentMessageLeaseResponse(BaseModel):
     leased_until: datetime
 
 
+class AgentMessageResponseRequest(BaseModel):
+    status: str = Field(default="success", description="Response status (success/error).")
+    response: Dict[str, Any] = Field(default_factory=dict, description="Structured tool/agent response.")
+    error: Optional[Dict[str, Any]] = Field(default=None, description="Structured error payload if any.")
+    response_protocol: Optional[str] = Field(default=None, description="Protocol of the response payload.")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional response metadata.")
+
+
+class AgentMessageResponse(BaseModel):
+    status: str
+    message_id: UUID
+    task_id: UUID
+    stored: bool = True
+    responded_at: datetime
+
+
 @router.post(
     "/queue/enqueue",
     response_model=TaskEnqueueResponse,
@@ -637,6 +653,76 @@ async def ack_agent_message(
     message.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"status": "acked", "message_id": str(message.id)}
+
+
+@router.post(
+    "/agents/messages/{message_id}/respond",
+    response_model=AgentMessageResponse,
+    tags=["Queue"],
+    summary="Submit a response for an agent message",
+    description="Stores a structured response payload and acknowledges the leased message.",
+)
+async def respond_agent_message(
+    message_id: UUID,
+    request: AgentMessageResponseRequest,
+    db: Session = Depends(get_session),
+):
+    result = await db.execute(
+        select(AgentMessage).where(AgentMessage.id == message_id)
+    )
+    message = result.scalars().first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found.")
+
+    task_result = await db.execute(
+        select(Task).where(Task.id == message.task_id)
+    )
+    task = task_result.scalars().first()
+
+    now = datetime.now(timezone.utc)
+    if task:
+        existing_results = task.results or {}
+        if not isinstance(existing_results, dict):
+            existing_results = {}
+
+        responses = existing_results.get("agent_responses")
+        if not isinstance(responses, list):
+            responses = []
+
+        responses.append(
+            {
+                "message_id": str(message.id),
+                "task_id": str(message.task_id),
+                "agent_id": str(message.agent_id),
+                "status": request.status,
+                "response": request.response,
+                "error": request.error,
+                "protocol": request.response_protocol,
+                "metadata": request.metadata,
+                "responded_at": now.isoformat(),
+            }
+        )
+        existing_results["agent_responses"] = responses
+        task.results = existing_results
+        task.updated_at = now
+        if task.completed_at is None and task.status != TaskStatus.DEAD_LETTER:
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = now
+
+    message.status = AgentMessageStatus.ACKED
+    message.acked_at = now
+    message.lease_owner = None
+    message.leased_until = None
+    message.updated_at = now
+    await db.commit()
+
+    return AgentMessageResponse(
+        status="received",
+        message_id=message.id,
+        task_id=message.task_id,
+        responded_at=now,
+        stored=task is not None,
+    )
 
 @router.post(
     "/ontology/upload",
