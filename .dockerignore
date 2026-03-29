@@ -1,0 +1,37 @@
+# Ignore direct environment directories
+venv/
+.venv/
+env/
+.env/
+
+# Ignore dependency directories
+node_modules/
+dist/
+build/
+.next/
+.serverless/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Ignore metadata
+.git/
+.github/
+.vscode/
+.idea/
+
+# Ignore logs and temp
+*.log
+*.tmp
+out.txt
+*.out
+debug_*.txt
+test_result.txt
+final_*.txt

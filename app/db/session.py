@@ -50,27 +50,48 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         yield session
 
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
 async def init_db():
-    async with engine.begin() as conn:
-        # Import models here to make sure they are registered with SQLModel.metadata
-        from app.db.models import (
-            ProtocolMapping,
-            ProtocolVersionDelta,
-            AgentRegistry,
-            SemanticOntology,
-            Task,
-            AgentMessage,
-            MappingFailureLog,
-            User,
-            PermissionProfile,
-            ProviderCredential,
-            Workflow,
-            WorkflowSchedule,
-        )
-        await conn.run_sync(SQLModel.metadata.create_all)
-        if engine.dialect.name == "postgresql":
-            await _ensure_timestamptz(conn)
-            await _ensure_workflow_columns(conn)
+    retries = 15
+    delay = 4
+    for i in range(retries):
+        try:
+            async with engine.begin() as conn:
+                # Import models here to make sure they are registered with SQLModel.metadata
+                from app.db.models import (
+                    ProtocolMapping,
+                    ProtocolVersionDelta,
+                    AgentRegistry,
+                    SemanticOntology,
+                    Task,
+                    AgentMessage,
+                    MappingFailureLog,
+                    User,
+                    PermissionProfile,
+                    ProviderCredential,
+                    Workflow,
+                    WorkflowSchedule,
+                )
+                await conn.run_sync(SQLModel.metadata.create_all)
+                if engine.dialect.name == "postgresql":
+                    # Advisory lock to prevent workers from clashing
+                    await conn.execute(text("SELECT pg_advisory_xact_lock(42)"))
+                    await _ensure_timestamptz(conn)
+                    await _ensure_extra_columns(conn)
+            logger.info("Database initialized successfully. Waiting 3s for background workers to start against stable schema...")
+            await asyncio.sleep(3)
+            return
+        except Exception as e:
+            if i < retries - 1:
+                logger.warning(f"Database connection failed (attempt {i+1}/{retries}): {e}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"Database connection failed after {retries} attempts. Exiting.")
+                raise e
 
 
 async def _ensure_timestamptz(conn) -> None:
@@ -114,19 +135,41 @@ async def _ensure_timestamptz(conn) -> None:
                 )
 
 
-async def _ensure_workflow_columns(conn) -> None:
-    await conn.execute(
-        text(
-            """
-            ALTER TABLE tasks
-            ADD COLUMN IF NOT EXISTS workflow_id UUID
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tasks_workflow_id ON tasks (workflow_id)
-            """
-        )
-    )
+async def _ensure_extra_columns(conn) -> None:
+    # Schema evolution: add columns that might be missing from older DB versions
+    updates = [
+        ("tasks", "workflow_id", "UUID", True),
+        ("tasks", "user_id", "UUID", True),
+        ("tasks", "target_agent_id", "UUID", True),
+        ("tasks", "eat", "TEXT", False),
+        ("tasks", "completed_at", "TIMESTAMP WITH TIME ZONE", False),
+        ("tasks", "dead_lettered_at", "TIMESTAMP WITH TIME ZONE", False),
+        ("agent_messages", "acked_at", "TIMESTAMP WITH TIME ZONE", False),
+        ("workflows", "eat", "TEXT", False),
+        ("workflows", "is_active", "BOOLEAN", False),
+        ("agent_registry", "is_active", "BOOLEAN", False),
+        ("users", "is_active", "BOOLEAN", False),
+        ("mapping_failure_logs", "applied", "BOOLEAN", False),
+    ]
+    
+    for table, col, col_type, create_index in updates:
+        try:
+            # Explicitly check for column existence for clearer logging
+            result = await conn.execute(
+                text("SELECT column_name FROM information_schema.columns WHERE table_name=:table AND column_name=:column"),
+                {"table": table, "column": col}
+            )
+            if not result.scalar():
+                logger.info(f"MIGRATION: Adding column {table}.{col} ({col_type})...")
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                )
+                if create_index:
+                    index_name = f"ix_{table}_{col}"
+                    await conn.execute(
+                        text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({col})")
+                    )
+            else:
+                logger.debug(f"Schema check: {table}.{col} already exists.")
+        except Exception as e:
+            logger.error(f"CRITICAL Schema Error on {table}.{col}: {e}")

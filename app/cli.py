@@ -66,7 +66,6 @@ def start_runtime(host: str = "127.0.0.1", port: int = 8000, initial_screen: Opt
 
     try:
         from app.main import app
-        from textual import run
         from tui.app import EngramTUI, load_config
     except ImportError as e:
         rprint(f"❌ [bold red]Error:[/] Could not load Engram modules: {e}")
@@ -119,7 +118,7 @@ def start_runtime(host: str = "127.0.0.1", port: int = 8000, initial_screen: Opt
         tui = EngramTUI(base_url=f"http://{host}:{port}/api/v1")
         if initial_screen:
             tui.initial_screen = initial_screen
-        run(tui)
+        tui.run()
     except Exception as e:
         rprint(f"❌ [bold red]TUI Error:[/] {e}")
         sys.exit(1)

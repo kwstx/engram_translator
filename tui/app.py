@@ -17,7 +17,7 @@ from tui.vault_service import VaultService
 CONFIG_DIR = os.path.expanduser("~/.engram")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
-DEFAULT_BASE_URL = "http://127.0.0.1:8000/api/v1"
+DEFAULT_BASE_URL = "http://127.0.0.1:5001/api/v1"
 
 # We'll fetch the real provider list from the backend on startup
 # to ensure the TUI is always in sync with the backend's capabilities.
@@ -99,13 +99,18 @@ def _normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return base
 
 def load_config() -> Dict[str, Any]:
+    config = _default_config()
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
-                return _normalize_config(_decrypt_config(f.read().strip()))
+                saved = _normalize_config(_decrypt_config(f.read().strip()))
+                # Migration: if using old default port, switch to new one (5001)
+                if saved.get("base_url") == "http://127.0.0.1:8000/api/v1":
+                    saved["base_url"] = DEFAULT_BASE_URL
+                config.update(saved)
         except (InvalidToken, json.JSONDecodeError, OSError):
-            return _default_config()
-    return _default_config()
+            pass
+    return config
 
 def save_config(config: Dict[str, Any]) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -166,14 +171,14 @@ class AuthScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container(id="auth-container"):
             yield Label("Engram Sign In", id="auth-title")
-            yield Label("Base URL")
-            yield Input(value=self.config.get("base_url") or DEFAULT_BASE_URL, id="base-url-input")
-            yield Label("Email")
-            yield Input(placeholder="name@company.com", id="email-input")
-            yield Label("Password")
-            yield Input(password=True, placeholder="********", id="password-input")
-            yield Label("Confirm Password (signup only)")
-            yield Input(password=True, placeholder="********", id="confirm-input")
+            yield Label("Base URL", classes="form-label")
+            yield Input(value=self.config.get("base_url") or DEFAULT_BASE_URL, id="base-url-input", classes="thin-input")
+            yield Label("Email", classes="form-label")
+            yield Input(placeholder="name@company.com", id="email-input", classes="thin-input")
+            yield Label("Password", classes="form-label")
+            yield Input(password=True, placeholder="********", id="password-input", classes="thin-input")
+            yield Label("Confirm Password (signup only)", classes="form-label")
+            yield Input(password=True, placeholder="********", id="confirm-input", classes="thin-input")
             yield Label("", id="auth-error")
             with Horizontal(id="auth-buttons"):
                 yield Button("Login", id="login-btn", variant="primary")
@@ -225,6 +230,14 @@ class AuthScreen(Screen):
     async def handle_signup(self) -> None:
         await self._authenticate(mode="signup")
 
+    @on(Input.Submitted)
+    async def handle_submit(self) -> None:
+        confirm = self.query_one("#confirm-input", Input).value.strip()
+        if confirm:
+            await self._authenticate(mode="signup")
+        else:
+            await self._authenticate(mode="login")
+
     async def _authenticate(self, mode: str) -> None:
         email = self.query_one("#email-input", Input).value.strip()
         password = self.query_one("#password-input", Input).value.strip()
@@ -235,22 +248,26 @@ class AuthScreen(Screen):
             self._set_error("Email and password are required.")
             return
 
-        if mode == "signup":
-            if password != confirm:
-                self._set_error("Passwords do not match.")
-                return
-            response = await _request(
-                "POST",
-                base_url,
-                "/auth/signup",
-                json_body={"email": email, "password": password, "user_metadata": {"source": "tui_client"}},
-                headers=_auth_header(self.config.get("eat")),
-            )
-            if response.status_code != 201:
-                self._set_error(response.json().get("detail", response.text))
-                return
-
         try:
+            if mode == "signup":
+                if password != confirm:
+                    self._set_error("Passwords do not match.")
+                    return
+                response = await _request(
+                    "POST",
+                    base_url,
+                    "/auth/signup",
+                    json_body={"email": email, "password": password, "user_metadata": {"source": "tui_client"}},
+                    headers=_auth_header(self.config.get("eat")),
+                )
+                if response.status_code != 201:
+                    try:
+                        err = response.json().get("detail", response.text)
+                    except:
+                        err = response.text
+                    self._set_error(str(err))
+                    return
+
             login_payload = await self._do_login(email, password, base_url)
             token = login_payload.get("access_token")
             eat = await self._generate_eat(token, base_url)
@@ -289,12 +306,13 @@ class ServiceConnectScreen(Screen):
                     value=self.provider.get("prefill_name", ""),
                     placeholder="e.g., notion, github, linear",
                     id="provider-name-input",
+                    classes="thin-input",
                 )
             else:
                 yield Label("Provider")
                 yield Label(display_name, id="provider-name-label")
             yield Label(f"{auth_label}")
-            yield Input(password=True, placeholder=auth_hint or "Paste token", id="provider-token-input")
+            yield Input(password=True, placeholder=auth_hint or "Paste token", id="provider-token-input", classes="thin-input")
             yield Label("", id="service-connect-error")
             with Horizontal(id="service-connect-buttons"):
                 yield Button("Connect", id="service-connect-btn", variant="primary")
@@ -857,15 +875,37 @@ class WorkflowRunsScreen(Screen):
     def _handle_close(self) -> None:
         self.dismiss(None)
 
+class WelcomeScreen(Screen):
+    BINDINGS = [
+        Binding("enter", "continue", "Continue"),
+        Binding("escape", "continue", "Continue"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        LOGO_BLOCKY = r"""
+  _____   _   _    ____   ____       _      __  __ 
+ | ____| | \ | |  / ___| |  _ \     / \    |  \/  |
+ |  _|   |  \| | | |  _  | |_) |   / _ \   | |\/| |
+ | |___  | |\  | | |_| | |  _ <   / ___ \  | |  | |
+ |_____| |_| \_|  \____| |_| \_\ /_/   \_\ |_|  |_|
+"""
+        with Container(id="welcome-container"):
+            yield Label("[#FF9966]* Welcome to [bold]Engram[/][/]", id="welcome-subtitle")
+            yield Static(f"[#FF9966]{LOGO_BLOCKY}[/]", id="welcome-logo")
+            yield Label("Press [bold]Enter[/] to continue", id="welcome-continue")
+
+    def action_continue(self) -> None:
+        self.app.pop_screen()
+
 # ASCII header
-LOGO = """
-  [bold orange1]______ _   _  _____ _____            __  __ [/]
- [bold orange1]|  ____| \ | |/ ____|  __ \     /\   |  \/  |[/]
- [bold orange1]| |__  |  \| | |  __| |__) |   /  \  | \  / |[/]
- [bold orange1]|  __| | . ` | | |_ |  _  /   / /\ \ | |\/| |[/]
- [bold orange1]| |____| |\  | |__| | | \ \  / ____ \| |  | |[/]
- [bold orange1]|______|_| \_|\_____|_|  \_\/_/    \_\_|  |_|[/]
-             [italic white]PROTOCOL BRIDGE[/] [bold dim]v0.1.0[/]
+LOGO = r"""[#2bdc8d]
+  _____   _   _    ____   ____       _      __  __ 
+ | ____| | \ | |  / ___| |  _ \     / \    |  \/  |
+ |  _|   |  \| | | |  _  | |_) |   / _ \   | |\/| |
+ | |___  | |\  | | |_| | |  _ <   / ___ \  | |  | |
+ |_____| |_| \_|  \____| |_| \_\ /_/   \_\ |_|  |_|
+[/]
+          [dim]Universal Protocol Bridge[/]
 """
 
 class EngramTUI(App):
@@ -893,29 +933,63 @@ class EngramTUI(App):
 
     CSS = """
     Screen {
-        background: #0f1115;
+        background: #0f0f0f;
+        color: #e6e1d7;
+    }
+
+    WelcomeScreen {
+        align: center middle;
+        background: #0f0f0f;
+    }
+
+    #welcome-container {
+        width: auto;
+        height: auto;
+        padding: 2 4;
+    }
+
+    #welcome-subtitle {
+        border: round #FF9966;
+        padding: 0 2;
+        margin-bottom: 2;
+        width: auto;
+    }
+
+    #welcome-logo {
+        color: #FF9966;
+        text-align: left;
+        width: auto;
+        margin-bottom: 4;
+    }
+
+    #welcome-continue {
+        text-align: left;
+        color: #b8b2a8;
     }
 
     #header {
-        height: 10;
-        content-align: center middle;
-        background: #1a1e26;
-        border-bottom: double #d35400;
-        margin-bottom: 1;
+        height: 8;
+        content-align: left top;
+        background: #0f0f0f;
+        border: none;
+        margin: 1 2 0 2;
+        padding: 0 2;
     }
 
     #main-container {
         height: 1fr;
+        margin: 0 2 1 2;
     }
 
     #main-left {
         width: 70%;
+        padding-right: 1;
     }
 
     #trace-panels {
         height: 13;
-        background: #12151c;
-        border: solid #2c3e50;
+        background: #121212;
+        border: round #1f2d28;
         padding: 1;
         margin-bottom: 1;
     }
@@ -926,112 +1000,144 @@ class EngramTUI(App):
 
     .trace-panel {
         width: 1fr;
-        border: solid #2c3e50;
+        border: round #1f2d28;
         margin-right: 1;
         padding: 0 1;
-        background: #0f1115;
+        background: #101010;
     }
 
     #translation-panel {
         height: 10;
-        background: #12151c;
-        border: solid #2c3e50;
+        background: #121212;
+        border: round #1f2d28;
         padding: 1;
         margin-bottom: 1;
     }
 
     .translation-panel {
         width: 1fr;
-        border: solid #2c3e50;
+        border: round #1f2d28;
         margin-right: 1;
         padding: 0 1;
-        background: #0f1115;
+        background: #101010;
     }
 
     .translation-title {
         text-style: bold;
-        color: #f39c12;
+        color: #2bdc8d;
         margin-bottom: 0;
     }
 
 
     .trace-title {
         text-style: bold;
-        color: #f39c12;
+        color: #2bdc8d;
         margin-bottom: 0;
     }
 
     #log-view {
         height: 1fr;
-        background: #12151c;
-        border: solid #2c3e50;
+        background: #121212;
+        border: round #1f2d28;
         padding: 1;
     }
 
     #sidebar {
         width: 30%;
-        background: #1a1e26;
-        border-left: solid #2c3e50;
+        background: #121212;
+        border: round #1f2d28;
         padding: 1;
     }
 
     .sidebar-title {
         text-style: bold;
-        color: #d35400;
+        color: #2bdc8d;
         margin-bottom: 1;
     }
 
     .stat-item {
         margin-bottom: 1;
-        color: #ecf0f1;
+        color: #d7d2c7;
     }
 
     #task-panel {
-        border: solid #2c3e50;
+        border: round #1f2d28;
         padding: 1;
         margin-bottom: 1;
-        background: #12151c;
+        background: #121212;
     }
 
     #task-current, #task-progress, #task-connectors {
-        color: #ecf0f1;
+        color: #e6e1d7;
     }
 
     #input-area {
         height: 3;
-        background: #1a1e26;
-        border-top: solid #d35400;
-        padding: 0 1;
+        background: #101010;
+        border-top: heavy #2bdc8d;
+        padding: 0 2;
+        margin: 0 2 1 2;
     }
 
     Input {
-        background: #1a1e26;
-        border: none;
-        color: #ecf0f1;
+        background: #101010;
+        border: solid #1f2d28;
+        color: #e6e1d7;
+    }
+
+    Input:focus {
+        border: solid #2bdc8d;
+    }
+
+    Button {
+        background: #101010;
+        color: #e6e1d7;
+        border: solid #1f2d28;
+    }
+
+    Button:focus, Button.-hover {
+        background: #132019;
+        border: solid #2bdc8d;
+        color: #f3e6d4;
     }
     
     .status-ok {
-        color: #2ecc71;
+        color: #2bdc8d;
     }
     
     .status-waiting {
-        color: #f1c40f;
+        color: #e0b15b;
     }
 
     #auth-container {
-        width: 60%;
+        width: 72%;
         height: auto;
-        padding: 2 3;
-        border: solid #d35400;
-        background: #1a1e26;
-        margin: 2 auto;
+        padding: 1 2;
+        border: round #1f2d28;
+        background: #101010;
+        margin: 1 4;
     }
 
     #auth-title {
-        content-align: center middle;
+        content-align: left middle;
         text-style: bold;
-        color: #d35400;
+        color: #2bdc8d;
         margin-bottom: 1;
+        width: auto;
+    }
+
+    .form-label {
+        color: #e6e1d7;
+    }
+
+    .thin-input {
+        background: #0f0f0f;
+        border: solid #1f2d28;
+        height: 3;
+    }
+
+    .thin-input:focus {
+        border: solid #2bdc8d;
     }
 
     #auth-buttons {
@@ -1039,7 +1145,16 @@ class EngramTUI(App):
         height: auto;
     }
 
+    #auth-buttons Button {
+        width: 1fr;
+    }
+
     #auth-error {
+        color: #e74c3c;
+        margin-top: 1;
+    }
+
+    #inline-auth-error {
         color: #e74c3c;
         margin-top: 1;
     }
@@ -1047,17 +1162,18 @@ class EngramTUI(App):
     #service-connect-container {
         width: 70%;
         height: auto;
-        padding: 2 3;
-        border: solid #d35400;
-        background: #1a1e26;
-        margin: 2 auto;
+        padding: 1 2;
+        border: round #1f2d28;
+        background: #101010;
+        margin: 1 4;
     }
 
     #service-connect-title {
-        content-align: center middle;
+        content-align: left middle;
         text-style: bold;
-        color: #d35400;
+        color: #2bdc8d;
         margin-bottom: 1;
+        width: auto;
     }
 
     #service-connect-buttons {
@@ -1073,17 +1189,18 @@ class EngramTUI(App):
     #workflow-container, #workflow-create-container, #workflow-schedule-container, #workflow-runs-container {
         width: 80%;
         height: auto;
-        padding: 2 3;
-        border: solid #d35400;
-        background: #1a1e26;
-        margin: 2 auto;
+        padding: 1 2;
+        border: round #1f2d28;
+        background: #101010;
+        margin: 1 4;
     }
 
     #workflow-title, #workflow-create-title, #workflow-schedule-title, #workflow-runs-title {
-        content-align: center middle;
+        content-align: left middle;
         text-style: bold;
-        color: #d35400;
+        color: #2bdc8d;
         margin-bottom: 1;
+        width: auto;
     }
 
     #workflow-buttons, #workflow-create-buttons, #workflow-schedule-buttons, #workflow-runs-buttons {
@@ -1098,7 +1215,7 @@ class EngramTUI(App):
 
     #services-panel {
         margin-top: 1;
-        border-top: solid #2c3e50;
+        border-top: solid #1f2d28;
         padding-top: 1;
     }
 
@@ -1122,24 +1239,24 @@ class EngramTUI(App):
     #debug-container {
         width: 95%;
         height: 95%;
-        border: double #d35400;
-        background: #0f1115;
-        margin: 1 auto;
+        border: heavy #2bdc8d;
+        background: #0f0f0f;
+        margin: 1 2;
         padding: 1;
     }
 
     #debug-title {
         content-align: center middle;
         text-style: bold;
-        color: #d35400;
+        color: #2bdc8d;
         margin-bottom: 1;
-        background: #1a1e26;
+        background: #101010;
         height: 3;
     }
 
     .debug-subtitle {
         text-style: bold underline;
-        color: #f39c12;
+        color: #2bdc8d;
         margin-bottom: 1;
     }
 
@@ -1149,7 +1266,7 @@ class EngramTUI(App):
 
     #debug-list-panel {
         width: 35%;
-        border-right: solid #2c3e50;
+        border-right: solid #1f2d28;
         padding: 0 1;
     }
 
@@ -1169,34 +1286,38 @@ class EngramTUI(App):
 
     .protocol-pane {
         width: 1fr;
-        border: solid #2c3e50;
+        border: round #1f2d28;
         margin: 0 1;
-        background: #12151c;
+        background: #121212;
     }
 
     .protocol-title {
         text-style: bold;
-        color: #3498db;
+        color: #2bdc8d;
         content-align: center middle;
-        background: #1a1e26;
+        background: #101010;
     }
 
     #debug-event-log, #debug-trace-source, #debug-trace-target, #debug-task-plan {
         height: 1fr;
-        background: #0f1115;
+        background: #0f0f0f;
     }
 
     #debug-footer {
         height: 3;
-        background: #1a1e26;
-        border-top: solid #d35400;
+        background: #101010;
+        border-top: solid #2bdc8d;
         padding: 0 2;
-        align: middle;
+        align: center middle;
     }
 
     #debug-status-hint {
         margin-left: 2;
-        color: #bdc3c7;
+        color: #b8b2a8;
+    }
+
+    .hidden {
+        display: none;
     }
     """
 
@@ -1223,85 +1344,102 @@ class EngramTUI(App):
         self.active_task_steps: Dict[int, Dict[str, Any]] = {}
         self.active_task_agents = set()
         self.active_task_total_steps: Optional[int] = None
+        self._auth_future: Optional[asyncio.Future] = None
 
     def compose(self) -> ComposeResult:
         # Header with Logo
         yield Static(LOGO, id="header")
 
+        # Inline Auth (same terminal window)
+        with Container(id="auth-container"):
+            yield Label("Engram Sign In", id="auth-title")
+            yield Label("Base URL", classes="form-label")
+            yield Input(value=self.base_url or DEFAULT_BASE_URL, id="inline-base-url", classes="thin-input")
+            yield Label("Email", classes="form-label")
+            yield Input(placeholder="name@company.com", id="inline-email", classes="thin-input")
+            yield Label("Password", classes="form-label")
+            yield Input(password=True, placeholder="********", id="inline-password", classes="thin-input")
+            yield Label("Confirm Password (signup only)", classes="form-label")
+            yield Input(password=True, placeholder="********", id="inline-confirm", classes="thin-input")
+            yield Label("", id="inline-auth-error")
+            with Horizontal(id="auth-buttons"):
+                yield Button("Login", id="inline-login-btn", variant="primary")
+                yield Button("Signup", id="inline-signup-btn")
+                yield Button("Quit", id="inline-quit-btn")
+
         # Main Layout
-        with Horizontal(id="main-container"):
-            with Vertical(id="main-left"):
-                with Container(id="trace-panels"):
-                    with Horizontal(classes="trace-row"):
-                        with Vertical(classes="trace-panel"):
-                            yield Label("CONNECTIONS", classes="trace-title")
-                            yield RichLog(id="trace-connections", highlight=True, markup=True)
-                        with Vertical(classes="trace-panel"):
-                            yield Label("AGENT EXECUTION", classes="trace-title")
-                            yield RichLog(id="trace-agents", highlight=True, markup=True)
-                    with Horizontal(classes="trace-row"):
-                        with Vertical(classes="trace-panel"):
-                            yield Label("TOOL USAGE", classes="trace-title")
-                            yield RichLog(id="trace-tools", highlight=True, markup=True)
-                        with Vertical(classes="trace-panel"):
-                            yield Label("RESPONSES", classes="trace-title")
-                            yield RichLog(id="trace-responses", highlight=True, markup=True)
+        with Container(id="main-shell"):
+            with Horizontal(id="main-container"):
+                with Vertical(id="main-left"):
+                    with Container(id="trace-panels"):
+                        with Horizontal(classes="trace-row"):
+                            with Vertical(classes="trace-panel"):
+                                yield Label("CONNECTIONS", classes="trace-title")
+                                yield RichLog(id="trace-connections", highlight=True, markup=True)
+                            with Vertical(classes="trace-panel"):
+                                yield Label("AGENT EXECUTION", classes="trace-title")
+                                yield RichLog(id="trace-agents", highlight=True, markup=True)
+                        with Horizontal(classes="trace-row"):
+                            with Vertical(classes="trace-panel"):
+                                yield Label("TOOL USAGE", classes="trace-title")
+                                yield RichLog(id="trace-tools", highlight=True, markup=True)
+                            with Vertical(classes="trace-panel"):
+                                yield Label("RESPONSES", classes="trace-title")
+                                yield RichLog(id="trace-responses", highlight=True, markup=True)
 
-                with Container(id="translation-panel"):
-                    with Horizontal():
-                        with Vertical(classes="translation-panel"):
-                            yield Label("ENGRAM TASK", classes="translation-title")
-                            yield RichLog(id="translation-engram", highlight=True, markup=True)
-                        with Vertical(classes="translation-panel"):
-                            yield Label("TOOL REQUEST", classes="translation-title")
-                            yield RichLog(id="translation-request", highlight=True, markup=True)
-                        with Vertical(classes="translation-panel"):
-                            yield Label("TOOL RESPONSE", classes="translation-title")
-                            yield RichLog(id="translation-response", highlight=True, markup=True)
+                    with Container(id="translation-panel"):
+                        with Horizontal():
+                            with Vertical(classes="translation-panel"):
+                                yield Label("ENGRAM TASK", classes="translation-title")
+                                yield RichLog(id="translation-engram", highlight=True, markup=True)
+                            with Vertical(classes="translation-panel"):
+                                yield Label("TOOL REQUEST", classes="translation-title")
+                                yield RichLog(id="translation-request", highlight=True, markup=True)
+                            with Vertical(classes="translation-panel"):
+                                yield Label("TOOL RESPONSE", classes="translation-title")
+                                yield RichLog(id="translation-response", highlight=True, markup=True)
 
-                # Translation Log
-                yield RichLog(id="log-view", highlight=True, markup=True)
+                    # Translation Log
+                    yield RichLog(id="log-view", highlight=True, markup=True)
+                
+                # Sidebar info
+                with Vertical(id="sidebar"):
+                    yield Label("SYSTEM STATUS", classes="sidebar-title")
+                    yield Label("[bold]FastAPI Engine:[/] [green]Online[/]", classes="stat-item")
+                    yield Label("[bold]Discovery Service:[/] [green]Active[/]", classes="stat-item")
+                    yield Label("[bold]Task Worker:[/] [green]Processing[/]", classes="stat-item")
+
+                    with Container(id="task-panel"):
+                        yield Label("TASK TRACKER", classes="sidebar-title")
+                        yield Label("CURRENT TASK", classes="sidebar-title")
+                        yield Static("No task submitted yet.", id="task-current")
+                        yield Label("PROGRESS", classes="sidebar-title")
+                        yield Static("Status: IDLE", id="task-progress")
+                        yield Label("ACTIVE CONNECTORS", classes="sidebar-title")
+                        yield Static("None", id="task-connectors")
+                    yield Label("\nRECENT ACTIVITY", classes="sidebar-title")
+                    yield Label("- A2A Protocol registered", classes="stat-item")
+                    yield Label("- MCP Mapping loaded", classes="stat-item")
+                    yield Label("- Bridge listener started", classes="stat-item")
+                    yield Label("\nCOMMANDS", classes="sidebar-title")
+                    yield Label("/status - Check bridge health", classes="stat-item")
+                    yield Label("/agents - List connected agents", classes="stat-item")
+                    yield Label("/login  - Sign in", classes="stat-item")
+                    yield Label("/logout - Sign out", classes="stat-item")
+                    yield Label("/services - Refresh services", classes="stat-item")
+                    yield Label("/connect <provider> - Connect service", classes="stat-item")
+                    yield Label("/tasks [limit] - View recent tasks", classes="stat-item")
+                    yield Label("/debug - Open developer console", classes="stat-item")
+
+                    with Container(id="services-panel"):
+                        yield Label("CONNECTED SERVICES", classes="sidebar-title")
+                        # Services will be dynamically populated in on_mount
+
+            # Input Area (Command prompt)
+            yield Input(placeholder="Type a task or /command (e.g., 'Prepare a report from Slack then send to Notion')", id="command-input")
             
-            # Sidebar info
-            with Vertical(id="sidebar"):
-                yield Label("📊 SYSTEM STATUS", classes="sidebar-title")
-                yield Label("✅ [bold]FastAPI Engine:[/] [green]Online[/]", classes="stat-item")
-                yield Label("✅ [bold]Discovery Service:[/] [green]Active[/]", classes="stat-item")
-                yield Label("⚡ [bold]Task Worker:[/] [green]Processing[/]", classes="stat-item")
-
-                with Container(id="task-panel"):
-                    yield Label("TASK TRACKER", classes="sidebar-title")
-                    yield Label("CURRENT TASK", classes="sidebar-title")
-                    yield Static("No task submitted yet.", id="task-current")
-                    yield Label("PROGRESS", classes="sidebar-title")
-                    yield Static("Status: IDLE", id="task-progress")
-                    yield Label("ACTIVE CONNECTORS", classes="sidebar-title")
-                    yield Static("None", id="task-connectors")
-                
-                yield Label("\n🛰️ RECENT ACTIVITY", classes="sidebar-title")
-                yield Label("• A2A Protocol registered", classes="stat-item")
-                yield Label("• MCP Mapping loaded", classes="stat-item")
-                yield Label("• Bridge listener started", classes="stat-item")
-                
-                yield Label("\n💡 COMMANDS", classes="sidebar-title")
-                yield Label("/status - Check bridge health", classes="stat-item")
-                yield Label("/agents - List connected agents", classes="stat-item")
-                yield Label("/login  - Sign in", classes="stat-item")
-                yield Label("/logout - Sign out", classes="stat-item")
-                yield Label("/services - Refresh services", classes="stat-item")
-                yield Label("/connect <provider> - Connect service", classes="stat-item")
-                yield Label("/tasks [limit] - View recent tasks", classes="stat-item")
-                yield Label("/debug - Open developer console", classes="stat-item")
-
-                with Container(id="services-panel"):
-                    yield Label("CONNECTED SERVICES", classes="sidebar-title")
-                    # Services will be dynamically populated in on_mount
-
-        # Input Area (Command prompt)
-        yield Input(placeholder="Type a task or /command (e.g., 'Prepare a report from Slack then send to Notion')", id="command-input")
-        
-        # Footer
-        yield Footer()
+            # Footer
+            yield Footer()
 
     async def on_mount(self) -> None:
         """Start listening for bridge events when the UI is ready."""
@@ -1314,11 +1452,13 @@ class EngramTUI(App):
         self.eat = config.get("eat")
         self.user_email = config.get("email")
         if not self.eat:
-            self.push_screen(AuthScreen(config), self._handle_auth_result)
+            self._set_auth_visible(True)
+        else:
+            self._set_auth_visible(False)
 
         log_view = self.query_one("#log-view", RichLog)
-        log_view.write("🚀 [bold orange1]Engram Protocol Bridge initialized.[/]")
-        log_view.write("📡 [dim]Waiting for protocol events on shared queue...[/]\n")
+        log_view.write("[bold #2bdc8d]>>[/] [bold]Engram Protocol Bridge initialized.[/]")
+        log_view.write("[dim]Waiting for protocol events on shared queue...[/]\n")
         
         # Start background listener
         self.message_receiver()
@@ -1329,6 +1469,8 @@ class EngramTUI(App):
         # NEW: Handle initial screen (e.g. from 'engram debug')
         if self.initial_screen == "debug":
             self.push_screen(DebugScreen(self))
+        else:
+            self.push_screen(WelcomeScreen())
 
     @work(exclusive=True, thread=True)
     def message_receiver(self):
@@ -1565,7 +1707,7 @@ class EngramTUI(App):
             task_connectors.update("None")
 
 
-    @on(Input.Submitted)
+    @on(Input.Submitted, "#command-input")
     def handle_command(self, event: Input.Submitted) -> None:
         """Handle command input."""
         cmd = event.value.strip()
@@ -1579,19 +1721,18 @@ class EngramTUI(App):
         if cmd == "/clear":
             log_view.clear()
         elif cmd == "/status":
-            log_view.write("Ã¢ÂÂ¹Ã¯Â¸Â [bold green]System Status:[/] All services operating within normal parameters.")
+            log_view.write("[bold #2bdc8d]OK:[/] System Status: All services operating within normal parameters.")
         elif cmd == "/login":
-            config = load_config()
-            self.push_screen(AuthScreen(config), self._handle_auth_result)
+            self._set_auth_visible(True)
         elif cmd == "/logout":
             self.token = None
             self.eat = None
             self.user_email = None
             save_config({"base_url": self.base_url, "token": None, "eat": None, "email": None})
             log_view.write("[yellow]Logged out. Please login again.[/]")
-            self.push_screen(AuthScreen(load_config()), self._handle_auth_result)
+            self._set_auth_visible(True)
         elif cmd == "/agents":
-            log_view.write("Ã¢ÂÂ¹Ã¯Â¸Â [bold yellow]Agents:[/] No active agent connections yet.")
+            log_view.write("[bold #e0b15b]Agents:[/] No active agent connections yet.")
         elif cmd == "/services":
             self.run_worker(self.refresh_connected_services(show_log=True), thread=False)
         elif cmd == "/workflows":
@@ -1634,7 +1775,7 @@ class EngramTUI(App):
             else:
                 log_view.write("[yellow]Usage:[/] /vault [list|clear|clear all]")
         elif cmd.startswith("/"):
-            log_view.write(f"Ã¢ÂšÂ Ã¯Â¸Â  Unknown command: [dim]{cmd}[/]")
+            log_view.write(f"[bold #e0b15b]Unknown command:[/] [dim]{cmd}[/]")
         else:
             self.run_worker(self._run_task_command(cmd), thread=False)
             
@@ -1649,6 +1790,117 @@ class EngramTUI(App):
     def action_workflows(self) -> None:
         self.push_screen(WorkflowListScreen(self))
 
+    def _set_auth_visible(self, visible: bool) -> None:
+        auth_container = self.query_one("#auth-container", Container)
+        main_shell = self.query_one("#main-shell", Container)
+        if visible:
+            auth_container.remove_class("hidden")
+            main_shell.add_class("hidden")
+            self.query_one("#inline-email", Input).focus()
+        else:
+            auth_container.add_class("hidden")
+            main_shell.remove_class("hidden")
+
+    def _set_inline_auth_error(self, message: str) -> None:
+        label = self.query_one("#inline-auth-error", Label)
+        label.update(message)
+
+    async def _do_inline_login(self, email: str, password: str, base_url: str) -> Optional[Dict[str, Any]]:
+        response = await _request(
+            "POST",
+            base_url,
+            "/auth/login",
+            data={"username": email, "password": password},
+            headers=_auth_header(self.eat),
+        )
+        if response.status_code != 200:
+            raise RuntimeError(response.json().get("detail", response.text))
+        return response.json()
+
+    async def _generate_inline_eat(self, token: str, base_url: str) -> str:
+        response = await _request(
+            "POST",
+            base_url,
+            "/auth/tokens/generate-eat",
+            headers=_auth_header(token),
+        )
+        if response.status_code != 200:
+            raise RuntimeError(response.json().get("detail", response.text))
+        return response.json().get("eat")
+
+    @on(Button.Pressed, "#inline-quit-btn")
+    def handle_inline_quit(self) -> None:
+        self.exit()
+
+    @on(Button.Pressed, "#inline-login-btn")
+    async def handle_inline_login(self) -> None:
+        await self._authenticate_inline(mode="login")
+
+    @on(Button.Pressed, "#inline-signup-btn")
+    async def handle_inline_signup(self) -> None:
+        await self._authenticate_inline(mode="signup")
+
+    @on(Input.Submitted, "#inline-email, #inline-password, #inline-confirm, #inline-base-url")
+    async def handle_inline_submit(self) -> None:
+        confirm = self.query_one("#inline-confirm", Input).value.strip()
+        if confirm:
+            await self._authenticate_inline(mode="signup")
+        else:
+            await self._authenticate_inline(mode="login")
+
+    async def _authenticate_inline(self, mode: str) -> None:
+        email = self.query_one("#inline-email", Input).value.strip()
+        password = self.query_one("#inline-password", Input).value.strip()
+        confirm = self.query_one("#inline-confirm", Input).value.strip()
+        base_url = self.query_one("#inline-base-url", Input).value.strip() or DEFAULT_BASE_URL
+
+        if not email or not password:
+            self._set_inline_auth_error("Email and password are required.")
+            return
+
+        try:
+            if mode == "signup":
+                if password != confirm:
+                    self._set_inline_auth_error("Passwords do not match.")
+                    return
+                response = await _request(
+                    "POST",
+                    base_url,
+                    "/auth/signup",
+                    json_body={"email": email, "password": password, "user_metadata": {"source": "tui_client"}},
+                    headers=_auth_header(self.eat),
+                )
+                if response.status_code != 201:
+                    try:
+                        err = response.json().get("detail", response.text)
+                    except:
+                        err = response.text
+                    self._set_inline_auth_error(str(err))
+                    return
+
+            login_payload = await self._do_inline_login(email, password, base_url)
+            token = login_payload.get("access_token")
+            eat = await self._generate_inline_eat(token, base_url)
+        except Exception as exc:
+            self._set_inline_auth_error(str(exc))
+            return
+
+        self.base_url = base_url
+        self.token = token
+        self.eat = eat
+        self.user_email = email
+        save_config({
+            "base_url": self.base_url,
+            "token": self.token,
+            "eat": self.eat,
+            "email": self.user_email,
+        })
+        self._set_inline_auth_error("")
+        self._set_auth_visible(False)
+        self.run_worker(self.refresh_connected_services(), thread=False)
+        if hasattr(self, "_auth_future") and self._auth_future and not self._auth_future.done():
+            self._auth_future.set_result(True)
+
     def _handle_auth_result(self, result: Optional[Dict[str, Any]]) -> None:
         if not result:
             return
@@ -1660,17 +1912,9 @@ class EngramTUI(App):
 
     async def _prompt_reauth(self) -> bool:
         loop = asyncio.get_running_loop()
-        future: asyncio.Future = loop.create_future()
-
-        def _handle(result: Optional[Dict[str, Any]]) -> None:
-            if result:
-                self._handle_auth_result(result)
-                future.set_result(True)
-            else:
-                future.set_result(False)
-
-        self.push_screen(AuthScreen(load_config()), _handle)
-        return await future
+        self._auth_future = loop.create_future()
+        self._set_auth_visible(True)
+        return await self._auth_future
 
     async def _ensure_eat(self) -> Optional[str]:
         if self.eat:
@@ -1917,20 +2161,24 @@ class EngramTUI(App):
             PROVIDERS = response.json()
             PROVIDER_MAP = {p["id"]: p for p in PROVIDERS}
             
-            # Rebuild the services panel
-            panel = self.query_one("#services-panel", Container)
-            # Remove existing dynamic rows (keep the title)
-            for child in panel.children[1:]:
-                child.remove()
-            
-            for provider in PROVIDERS:
-                row = Horizontal(classes="service-row")
-                row.mount(Label(provider["name"], id=f"service-name-{provider['id']}", classes="service-name"))
-                row.mount(Label("Checking...", id=f"service-status-{provider['id']}", classes="service-status status-waiting"))
-                row.mount(Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn"))
-                panel.mount(row)
-            
-            await self.refresh_connected_services()
+            try:
+                # Rebuild the services panel
+                panel = self.query_one("#services-panel", Container)
+                # Remove existing service rows (keep the title)
+                panel.query("Horizontal.service-row").remove()
+                
+                for provider in PROVIDERS:
+                    row = Horizontal(
+                        Label(provider["name"], id=f"service-name-{provider['id']}", classes="service-name"),
+                        Label("Checking...", id=f"service-status-{provider['id']}", classes="service-status status-waiting"),
+                        Button("Connect", id=f"service-connect-{provider['id']}", classes="service-btn"),
+                        classes="service-row"
+                    )
+                    panel.mount(row)
+                
+                await self.refresh_connected_services()
+            except Exception as e:
+                self.log(f"Service refresh failed: {e}")
 
     def _set_service_status(self, provider_id: str, status: str, connected: bool) -> None:
         try:
