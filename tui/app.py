@@ -17,7 +17,7 @@ from tui.vault_service import VaultService
 CONFIG_DIR = os.path.expanduser("~/.engram")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.enc")
 KEY_FILE = os.path.join(CONFIG_DIR, "key")
-DEFAULT_BASE_URL = "http://127.0.0.1:5001/api/v1"
+DEFAULT_BASE_URL = "http://127.0.0.1:8000/api/v1"
 
 # We'll fetch the real provider list from the backend on startup
 # to ensure the TUI is always in sync with the backend's capabilities.
@@ -104,8 +104,8 @@ def load_config() -> Dict[str, Any]:
         try:
             with open(CONFIG_FILE, "r") as f:
                 saved = _normalize_config(_decrypt_config(f.read().strip()))
-                # Migration: if using old default port, switch to new one (5001)
-                if saved.get("base_url") == "http://127.0.0.1:8000/api/v1":
+                # Restoration Migration: If the user was forced onto port 5001 (broken default), move them back to 8000
+                if saved.get("base_url") == "http://127.0.0.1:5001/api/v1":
                     saved["base_url"] = DEFAULT_BASE_URL
                 config.update(saved)
         except (InvalidToken, json.JSONDecodeError, OSError):
@@ -912,422 +912,6 @@ class EngramTUI(App):
     """
     A terminal-based interface for the Engram Protocol Bridge.
     """
-    CSS = """
-    """
-    
-    def __init__(self, base_url: Optional[str] = None):
-        super().__init__()
-        self.cli_base_url = base_url
-        self.base_url = None
-        self.token = None
-        self.eat = None
-        self.user_email = None
-        
-        # State trackers
-        self.active_task_id = None
-        self.active_task_text = None
-        self.active_task_status = None
-        self.active_task_total_steps = 0
-        self.active_task_steps = {}
-        self.active_task_agents = set()
-
-    CSS = """
-    Screen {
-        background: #0f0f0f;
-        color: #e6e1d7;
-    }
-
-    WelcomeScreen {
-        align: center middle;
-        background: #0f0f0f;
-    }
-
-    #welcome-container {
-        width: auto;
-        height: auto;
-        padding: 2 4;
-    }
-
-    #welcome-subtitle {
-        border: round #FF9966;
-        padding: 0 2;
-        margin-bottom: 2;
-        width: auto;
-    }
-
-    #welcome-logo {
-        color: #FF9966;
-        text-align: left;
-        width: auto;
-        margin-bottom: 4;
-    }
-
-    #welcome-continue {
-        text-align: left;
-        color: #b8b2a8;
-    }
-
-    #header {
-        height: 8;
-        content-align: left top;
-        background: #0f0f0f;
-        border: none;
-        margin: 1 2 0 2;
-        padding: 0 2;
-    }
-
-    #main-container {
-        height: 1fr;
-        margin: 0 2 1 2;
-    }
-
-    #main-left {
-        width: 70%;
-        padding-right: 1;
-    }
-
-    #trace-panels {
-        height: 13;
-        background: #121212;
-        border: round #1f2d28;
-        padding: 1;
-        margin-bottom: 1;
-    }
-
-    .trace-row {
-        height: 1fr;
-    }
-
-    .trace-panel {
-        width: 1fr;
-        border: round #1f2d28;
-        margin-right: 1;
-        padding: 0 1;
-        background: #101010;
-    }
-
-    #translation-panel {
-        height: 10;
-        background: #121212;
-        border: round #1f2d28;
-        padding: 1;
-        margin-bottom: 1;
-    }
-
-    .translation-panel {
-        width: 1fr;
-        border: round #1f2d28;
-        margin-right: 1;
-        padding: 0 1;
-        background: #101010;
-    }
-
-    .translation-title {
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 0;
-    }
-
-
-    .trace-title {
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 0;
-    }
-
-    #log-view {
-        height: 1fr;
-        background: #121212;
-        border: round #1f2d28;
-        padding: 1;
-    }
-
-    #sidebar {
-        width: 30%;
-        background: #121212;
-        border: round #1f2d28;
-        padding: 1;
-    }
-
-    .sidebar-title {
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 1;
-    }
-
-    .stat-item {
-        margin-bottom: 1;
-        color: #d7d2c7;
-    }
-
-    #task-panel {
-        border: round #1f2d28;
-        padding: 1;
-        margin-bottom: 1;
-        background: #121212;
-    }
-
-    #task-current, #task-progress, #task-connectors {
-        color: #e6e1d7;
-    }
-
-    #input-area {
-        height: 3;
-        background: #101010;
-        border-top: heavy #2bdc8d;
-        padding: 0 2;
-        margin: 0 2 1 2;
-    }
-
-    Input {
-        background: #101010;
-        border: solid #1f2d28;
-        color: #e6e1d7;
-    }
-
-    Input:focus {
-        border: solid #2bdc8d;
-    }
-
-    Button {
-        background: #101010;
-        color: #e6e1d7;
-        border: solid #1f2d28;
-    }
-
-    Button:focus, Button.-hover {
-        background: #132019;
-        border: solid #2bdc8d;
-        color: #f3e6d4;
-    }
-    
-    .status-ok {
-        color: #2bdc8d;
-    }
-    
-    .status-waiting {
-        color: #e0b15b;
-    }
-
-    #auth-container {
-        width: 72%;
-        height: auto;
-        padding: 1 2;
-        border: round #1f2d28;
-        background: #101010;
-        margin: 1 4;
-    }
-
-    #auth-title {
-        content-align: left middle;
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 1;
-        width: auto;
-    }
-
-    .form-label {
-        color: #e6e1d7;
-    }
-
-    .thin-input {
-        background: #0f0f0f;
-        border: solid #1f2d28;
-        height: 3;
-    }
-
-    .thin-input:focus {
-        border: solid #2bdc8d;
-    }
-
-    #auth-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-
-    #auth-buttons Button {
-        width: 1fr;
-    }
-
-    #auth-error {
-        color: #e74c3c;
-        margin-top: 1;
-    }
-
-    #inline-auth-error {
-        color: #e74c3c;
-        margin-top: 1;
-    }
-
-    #service-connect-container {
-        width: 70%;
-        height: auto;
-        padding: 1 2;
-        border: round #1f2d28;
-        background: #101010;
-        margin: 1 4;
-    }
-
-    #service-connect-title {
-        content-align: left middle;
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 1;
-        width: auto;
-    }
-
-    #service-connect-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-
-    #service-connect-error {
-        color: #e74c3c;
-        margin-top: 1;
-    }
-
-    #workflow-container, #workflow-create-container, #workflow-schedule-container, #workflow-runs-container {
-        width: 80%;
-        height: auto;
-        padding: 1 2;
-        border: round #1f2d28;
-        background: #101010;
-        margin: 1 4;
-    }
-
-    #workflow-title, #workflow-create-title, #workflow-schedule-title, #workflow-runs-title {
-        content-align: left middle;
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 1;
-        width: auto;
-    }
-
-    #workflow-buttons, #workflow-create-buttons, #workflow-schedule-buttons, #workflow-runs-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-
-    #workflow-create-error, #workflow-schedule-error {
-        color: #e74c3c;
-        margin-top: 1;
-    }
-
-    #services-panel {
-        margin-top: 1;
-        border-top: solid #1f2d28;
-        padding-top: 1;
-    }
-
-    .service-row {
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    .service-name {
-        width: 45%;
-    }
-
-    .service-status {
-        width: 30%;
-    }
-
-    .service-btn {
-        width: 25%;
-    }
-
-    #debug-container {
-        width: 95%;
-        height: 95%;
-        border: heavy #2bdc8d;
-        background: #0f0f0f;
-        margin: 1 2;
-        padding: 1;
-    }
-
-    #debug-title {
-        content-align: center middle;
-        text-style: bold;
-        color: #2bdc8d;
-        margin-bottom: 1;
-        background: #101010;
-        height: 3;
-    }
-
-    .debug-subtitle {
-        text-style: bold underline;
-        color: #2bdc8d;
-        margin-bottom: 1;
-    }
-
-    #debug-main-layout {
-        height: 1fr;
-    }
-
-    #debug-list-panel {
-        width: 35%;
-        border-right: solid #1f2d28;
-        padding: 0 1;
-    }
-
-    #debug-detail-panel {
-        width: 65%;
-        padding: 0 1;
-    }
-
-    .debug-actions {
-        height: 3;
-        margin-top: 1;
-    }
-
-    #debug-tabs {
-        height: 1fr;
-    }
-
-    .protocol-pane {
-        width: 1fr;
-        border: round #1f2d28;
-        margin: 0 1;
-        background: #121212;
-    }
-
-    .protocol-title {
-        text-style: bold;
-        color: #2bdc8d;
-        content-align: center middle;
-        background: #101010;
-    }
-
-    #debug-event-log, #debug-trace-source, #debug-trace-target, #debug-task-plan {
-        height: 1fr;
-        background: #0f0f0f;
-    }
-
-    #debug-footer {
-        height: 3;
-        background: #101010;
-        border-top: solid #2bdc8d;
-        padding: 0 2;
-        align: center middle;
-    }
-
-    #debug-status-hint {
-        margin-left: 2;
-        color: #b8b2a8;
-    }
-
-    .hidden {
-        display: none;
-    }
-    """
-
-    BINDINGS = [
-        Binding("q", "quit", "Quit", show=True),
-        Binding("c", "clear", "Clear Logs", show=True),
-        Binding("r", "refresh", "Refresh Stats", show=True),
-        Binding("s", "services", "Services", show=True),
-        Binding("w", "workflows", "Workflows", show=True),
-    ]
 
     def __init__(self, base_url: Optional[str] = None):
         super().__init__()
@@ -2070,37 +1654,50 @@ class EngramTUI(App):
 
     async def _run_task_command(self, command: str) -> None:
         log_view = self.query_one("#log-view", RichLog)
-        eat = await self._ensure_eat()
-        if not eat:
-            log_view.write("[bold red]Auth required:[/] Please login to continue.")
-            return
+        
+        # Immediate visual feedback
+        log_view.write(f"[bold cyan]> {command}[/]")
+        log_view.write("[dim]System:[/] Analyzing task context and dependencies...")
 
-        ok = await self._ensure_required_providers_connected(command, log_view)
-        if not ok:
-            return
-
-        self._reset_task_tracker(command, None)
-
-        request_body = {
-            "command": command,
-            "metadata": {
-                "client": "engram-tui",
-                "timestamp": time.time(),
-            },
-        }
-
-        log_view.write("[dim]Submitting task to Engram backend...[/]")
         try:
+            eat = await self._ensure_eat()
+            if not eat:
+                log_view.write("[bold red]Auth required:[/] Please login to continue.")
+                return
+
+            ok = await self._ensure_required_providers_connected(command, log_view)
+            if not ok:
+                return
+
+            self._reset_task_tracker(command, None)
+
+            request_body = {
+                "command": command,
+                "metadata": {
+                    "client": "engram-tui",
+                    "timestamp": time.time(),
+                },
+            }
+
+            log_view.write("[dim]Submitting task to Engram backend...[/]")
             response = await self._authed_request(
                 "POST",
                 "/tasks/submit",
                 json_body=request_body,
             )
+            
+            if response.status_code != 200:
+                log_view.write(f"[bold red]Submission failed:[/] {_extract_error_detail(response)}")
+                return
+
+            payload = response.json()
+            task_id = payload.get("task_id")
+            log_view.write(f"[bold green]Task accepted:[/] {task_id}")
+            self._reset_task_tracker(command, str(task_id))
         except Exception as exc:
-            log_view.write(f"[bold red]Submission error:[/] {str(exc)}")
-            return
-        if response.status_code != 200:
-            log_view.write(f"[bold red]Submission failed:[/] {_extract_error_detail(response)}")
+            log_view.write(f"[bold red]System Error:[/] {str(exc)}")
+            if "ConnectError" in str(exc):
+                log_view.write(f"[yellow]Hint:[/] Ensure backend is running at [bold]{self.base_url}[/]")
             return
 
         payload = response.json()
