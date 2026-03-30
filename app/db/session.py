@@ -6,6 +6,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, create_engine
 from app.core.config import settings
 from typing import AsyncGenerator
+import asyncio
+import logging
 
 # Prevent libpq-style env vars from leaking into asyncpg
 for key in ("PGSSLMODE", "PGCHANNELBINDING", "PGSSLROOTCERT", "PGSSLCERT", "PGSSLKEY", "PGSSLCRL"):
@@ -50,126 +52,48 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         yield session
 
-import asyncio
-import logging
-
 logger = logging.getLogger(__name__)
 
 async def init_db():
+    """
+    Initializes the database connection and runs migrations.
+    In production, this replaces manual 'create_all' with Alembic versioning.
+    """
     retries = 15
     delay = 4
     for i in range(retries):
         try:
+            # Check connection
             async with engine.begin() as conn:
-                # Import models here to make sure they are registered with SQLModel.metadata
-                from app.db.models import (
-                    ProtocolMapping,
-                    ProtocolVersionDelta,
-                    AgentRegistry,
-                    SemanticOntology,
-                    Task,
-                    AgentMessage,
-                    MappingFailureLog,
-                    User,
-                    PermissionProfile,
-                    ProviderCredential,
-                    Workflow,
-                    WorkflowSchedule,
-                )
-                await conn.run_sync(SQLModel.metadata.create_all)
+                await conn.execute(text("SELECT 1"))
+                
+                # Check for advisory lock to prevent multiple workers from migrating at once
                 if engine.dialect.name == "postgresql":
-                    # Advisory lock to prevent workers from clashing
                     await conn.execute(text("SELECT pg_advisory_xact_lock(42)"))
-                    await _ensure_timestamptz(conn)
-                    await _ensure_extra_columns(conn)
-            logger.info("Database initialized successfully. Waiting 3s for background workers to start against stable schema...")
-            await asyncio.sleep(3)
+                
+                logger.info("Database connection established. Running migrations...")
+                
+                # Run Alembic migrations programmatically
+                # Note: This runs in the same thread, which is fine for startup
+                from alembic.config import Config
+                from alembic import command
+                
+                def run_upgrade():
+                    alembic_cfg = Config("alembic.ini")
+                    # Enforce the same DATABASE_URL from settings
+                    alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+                    command.upgrade(alembic_cfg, "head")
+
+                # Alembic's 'upgrade' command is synchronous, but our env.py handles the async loop
+                # So we just call it.
+                await asyncio.to_thread(run_upgrade)
+
+            logger.info("Database initialized and migrated successfully.")
             return
         except Exception as e:
             if i < retries - 1:
-                logger.warning(f"Database connection failed (attempt {i+1}/{retries}): {e}. Retrying in {delay}s...")
+                logger.warning(f"Database initialization failed (attempt {i+1}/{retries}): {e}. Retrying in {delay}s...")
                 await asyncio.sleep(delay)
             else:
-                logger.error(f"Database connection failed after {retries} attempts. Exiting.")
+                logger.error(f"Database initialization failed after {retries} attempts. Exiting.")
                 raise e
-
-
-async def _ensure_timestamptz(conn) -> None:
-    columns = {
-        "protocol_mapping": ["created_at", "updated_at"],
-        "protocol_version_delta": ["created_at", "updated_at"],
-        "agent_registry": ["last_seen"],
-        "semantic_ontology": ["created_at"],
-        "tasks": ["leased_until", "created_at", "updated_at", "completed_at", "dead_lettered_at"],
-        "agent_messages": ["leased_until", "created_at", "updated_at", "acked_at"],
-        "mapping_failure_logs": ["created_at"],
-        "users": ["created_at", "updated_at"],
-        "permission_profiles": ["created_at", "updated_at"],
-        "provider_credentials": ["created_at", "updated_at"],
-        "workflows": ["created_at", "updated_at", "last_run_at"],
-        "workflow_schedules": ["created_at", "updated_at", "next_run_at", "last_run_at"],
-    }
-
-    for table, cols in columns.items():
-        for col in cols:
-            result = await conn.execute(
-                text(
-                    """
-                    SELECT data_type
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = :table
-                      AND column_name = :column
-                    """
-                ),
-                {"table": table, "column": col},
-            )
-            data_type = result.scalar()
-            if data_type == "timestamp without time zone":
-                await conn.execute(
-                    text(
-                        f"ALTER TABLE {table} "
-                        f"ALTER COLUMN {col} TYPE TIMESTAMP WITH TIME ZONE "
-                        f"USING timezone('UTC', {col})"
-                    )
-                )
-
-
-async def _ensure_extra_columns(conn) -> None:
-    # Schema evolution: add columns that might be missing from older DB versions
-    updates = [
-        ("tasks", "workflow_id", "UUID", True),
-        ("tasks", "user_id", "UUID", True),
-        ("tasks", "target_agent_id", "UUID", True),
-        ("tasks", "eat", "TEXT", False),
-        ("tasks", "completed_at", "TIMESTAMP WITH TIME ZONE", False),
-        ("tasks", "dead_lettered_at", "TIMESTAMP WITH TIME ZONE", False),
-        ("agent_messages", "acked_at", "TIMESTAMP WITH TIME ZONE", False),
-        ("workflows", "eat", "TEXT", False),
-        ("workflows", "is_active", "BOOLEAN", False),
-        ("agent_registry", "is_active", "BOOLEAN", False),
-        ("users", "is_active", "BOOLEAN", False),
-        ("mapping_failure_logs", "applied", "BOOLEAN", False),
-    ]
-    
-    for table, col, col_type, create_index in updates:
-        try:
-            # Explicitly check for column existence for clearer logging
-            result = await conn.execute(
-                text("SELECT column_name FROM information_schema.columns WHERE table_name=:table AND column_name=:column"),
-                {"table": table, "column": col}
-            )
-            if not result.scalar():
-                logger.info(f"MIGRATION: Adding column {table}.{col} ({col_type})...")
-                await conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-                )
-                if create_index:
-                    index_name = f"ix_{table}_{col}"
-                    await conn.execute(
-                        text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({col})")
-                    )
-            else:
-                logger.debug(f"Schema check: {table}.{col} already exists.")
-        except Exception as e:
-            logger.error(f"CRITICAL Schema Error on {table}.{col}: {e}")
