@@ -262,10 +262,15 @@ class AuthScreen(Screen):
                         err = response.text
                     self._set_error(str(err))
                     return
-
-            login_payload = await self._do_login(email, password, base_url)
-            token = login_payload.get("access_token")
-            eat = await self._generate_eat(token, base_url)
+                
+                # In the new production-grade backend, signup returns the tokens directly
+                payload = response.json()
+                token = payload.get("access_token")
+                eat = payload.get("eat")
+            else:
+                login_payload = await self._do_login(email, password, base_url)
+                token = login_payload.get("access_token")
+                eat = await self._generate_eat(token, base_url)
         except Exception as exc:
             self._set_error(str(exc))
             return

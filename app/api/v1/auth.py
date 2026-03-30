@@ -39,8 +39,14 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-@router.post("/signup", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-async def signup(user_in: UserCreate, db: Session = Depends(get_session)):
+class SignupResult(BaseModel):
+    user: UserPublic
+    access_token: str
+    token_type: str = "bearer"
+    eat: Optional[str] = None
+
+@router.post("/signup", response_model=SignupResult, status_code=status.HTTP_201_CREATED)
+async def signup(request: Request, user_in: UserCreate, db: Session = Depends(get_session)):
     # Check if user already exists
     statement = select(User).where(User.email == user_in.email)
     result = await db.execute(statement)
@@ -75,9 +81,42 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_session)):
 
     await db.commit()
     await db.refresh(db_obj)
-    bind_context(user_id=str(db_obj.id))
-    logger.info("Signup successful", user_id=str(db_obj.id))
-    return db_obj
+    
+    # Auto-login after signup to provide immediate credentials
+    session_id = SessionService.create_session(
+        user_id=str(db_obj.id),
+        metadata={
+            "user_agent": request.headers.get("user-agent", "unknown"),
+            "ip_address": request.client.host if request.client else "unknown",
+            "event": "auto_signup_login"
+        }
+    )
+    
+    access_token = create_access_token(
+        data={
+            "sub": str(db_obj.id), 
+            "email": db_obj.email, 
+            "sid": session_id,
+            "scope": "translate:a2a"
+        }
+    )
+    
+    # Generate an initial long-lived EAT (30 days default) automatically
+    eat = create_engram_access_token(
+        user_id=str(db_obj.id),
+        permissions=default_permissions,
+        expires_delta=timedelta(days=30)
+    )
+    
+    bind_context(user_id=str(db_obj.id), session_id=session_id)
+    logger.info("Signup and auto-authentication successful", user_id=str(db_obj.id), session_id=session_id)
+    
+    return {
+        "user": db_obj,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "eat": eat
+    }
 
 @router.post("/login", response_model=Token)
 async def login(
