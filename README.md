@@ -29,6 +29,535 @@ flowchart LR
 
 ---
 
+## What's New
+
+### 1. AI Provider Selection Hub (TUI)
+
+The TUI includes a categorized **Model Directory** that lists major AI providers and their available model families. Selecting a provider opens a provider-specific API connection screen with pre-filled key format hints.
+
+**Supported providers and their connection screens:**
+
+| Provider | Models | Key Format | Connection Screen Class |
+| :--- | :--- | :--- | :--- |
+| **OpenAI** | GPT-4o, o1, o3-mini | `sk-proj-...` | `OpenAIConnectScreen` |
+| **Anthropic** | Claude 3.5 Sonnet, Claude 3 Opus | `sk-ant-api03-...` | `AnthropicConnectScreen` |
+| **Google DeepMind** | Gemini 1.5 Pro, 2.0 Flash | `AIzaSy...` | `GoogleConnectScreen` |
+| **Meta / LLaMA** | LLaMA 3.1, 3.2 (self-hosted/API) | `llama-...` | `LlamaConnectScreen` |
+| **Mistral AI** | Mistral Large, Mixtral 8x22B | Mistral API Key | `MistralConnectScreen` |
+| **xAI (Grok)** | Grok-2, Grok-1.5 | `xoxb-...` | `GrokConnectScreen` |
+| **Perplexity** | Research / Web Search | `pplx-...` | `PerplexityConnectScreen` |
+| **DeepSeek** | DeepSeek-Coder | `sk-...` | `DeepseekConnectScreen` |
+
+The directory is rendered via `ProviderSelectionScreen` in `tui/app.py`. Providers are grouped into categories (**AI Models** and **Software Tools**), with disabled header rows acting as section labels. Selecting a list item dismisses the screen and pushes the matching connection screen onto the stack.
+
+```mermaid
+flowchart TD
+    A["WelcomeScreen"] -->|"Setup API Keys"| B["ProviderSelectionScreen"]
+    B -->|"sel-openai"| C["OpenAIConnectScreen"]
+    B -->|"sel-anthropic"| D["AnthropicConnectScreen"]
+    B -->|"sel-google"| E["GoogleConnectScreen"]
+    B -->|"sel-llama"| F["LlamaConnectScreen"]
+    B -->|"sel-mistral"| G["MistralConnectScreen"]
+    B -->|"sel-grok"| H["GrokConnectScreen"]
+    B -->|"sel-perplexity"| I["PerplexityConnectScreen"]
+    B -->|"sel-deepseek"| J["DeepseekConnectScreen"]
+    C & D & E & F & G & H & I & J -->|"POST /credentials"| K["Backend Vault"]
+```
+
+Each connection screen inherits from `BaseServiceConnectScreen`, which handles the `POST /credentials` call to the backend and stores the credential locally via `VaultService`. The connection is provider-specific: it sends the `provider_name`, `credential_type` (either `api_key` or `oauth`), and the raw token as encrypted metadata.
+
+---
+
+### 2. Automated Engram Access Token (EAT) Generation
+
+The `/signup` endpoint (`app/api/v1/auth.py`) automatically generates and returns a long-lived JWT called an **Engram Access Token (EAT)** upon successful registration. This eliminates the need to run `scripts/generate_token.py` manually after signing up.
+
+**What happens on `POST /api/v1/auth/signup`:**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as POST /auth/signup
+    participant DB as PostgreSQL
+    participant JWT as Token Engine
+
+    Client->>API: { email, password }
+    API->>DB: INSERT User + PermissionProfile
+    DB-->>API: user_id
+    API->>JWT: create_access_token(sub=user_id, scope="translate:a2a", sid=session_id)
+    JWT-->>API: access_token (short-lived, 7 days)
+    API->>JWT: create_engram_access_token(user_id, permissions, 30 days)
+    JWT-->>API: EAT (long-lived, 30 days)
+    API-->>Client: { user, access_token, eat }
+```
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "dev@example.com", "password": "s3cur3!", "user_metadata": {}}'
+```
+
+**Response (HTTP 201):**
+
+```json
+{
+  "user": {
+    "id": "a1b2c3d4-...",
+    "email": "dev@example.com",
+    "user_metadata": {},
+    "is_active": true
+  },
+  "access_token": "eyJhbGci...",
+  "token_type": "bearer",
+  "eat": "eyJhbGci..."
+}
+```
+
+**EAT structure (decoded):**
+
+| Claim | Value | Description |
+| :--- | :--- | :--- |
+| `sub` | `"a1b2c3d4-..."` | User UUID |
+| `type` | `"EAT"` | Token type identifier — distinguishes EATs from standard session tokens |
+| `allowed_tools` | `["core_translator", "discovery"]` | Tool IDs this token grants access to |
+| `scopes` | `{"core_translator": ["read", "execute"], "discovery": ["read"]}` | Per-tool permission map |
+| `scope` | `"execute read"` | Flattened space-separated scope string for OAuth2 compatibility |
+| `exp` | `1750000000` | Expiration (30 days from issue by default) |
+| `iss` | `AUTH_ISSUER` | Issuer claim, validated on every request |
+| `aud` | `AUTH_AUDIENCE` | Audience claim, validated on every request |
+| `jti` | `"uuid-..."` | Unique token ID for revocation tracking via Redis |
+
+The `access_token` is a short-lived session token (default 7 days, configurable via `ACCESS_TOKEN_EXPIRE_MINUTES`). The `eat` is the long-lived token (30 days) intended for agent-to-agent authentication. Both tokens can be revoked via `POST /api/v1/auth/tokens/revoke-eat` or `POST /api/v1/auth/logout`.
+
+---
+
+### 3. CLI Debugging & Monitoring Suite
+
+A `debug` subcommand was added to the CLI (`app/cli.py`). Running `engram debug` (or `python app/cli.py debug`) starts the backend and launches the TUI directly into a `DebugScreen` instead of the standard `WelcomeScreen`.
+
+**Launch commands:**
+
+```bash
+# Via the CLI entry point
+python app/cli.py debug
+
+# Via the batch script (Windows)
+.\engram.bat debug
+
+# With custom host/port
+python app/cli.py debug --host 0.0.0.0 --port 9000
+```
+
+**DebugScreen capabilities:**
+
+| Panel | Widget | What it shows |
+| :--- | :--- | :--- |
+| **Task List** | `DataTable` | All queued/running/completed tasks with IDs, status, and timestamps |
+| **Protocol Trace** | `TabbedContent` with source/target panes | Side-by-side view of the original message and its translated output (e.g., A2A input → MCP output) |
+| **Event Log** | `RichLog` | Live stream of backend events — translation attempts, version delta upgrades, mapping failures, and task state transitions |
+
+The event log is powered by `tui_bridge.py`, which defines a `structlog` processor called `tui_logger_processor`. This processor intercepts translation-related log events and pushes plain-English messages to an async queue (`tui_event_queue`) that the TUI polls. The following backend events are captured and displayed:
+
+```
+Event: "Translating message"    → "🔄 Translating message from MCP to A2A..."
+Event: "Applied version delta"  → "✨ MCP message upgraded: 1.0 ➡️ 2.0"
+Event: "Translation failed"     → "❌ Translation failed: <error>"
+Event: "No translation rule"    → "⚠️ Missing map: No path found for X to Y"
+Event: "Version mismatch"       → "⚖️ Version mismatch in MCP: Found 1.0, expected 2.0"
+```
+
+The debug CSS layout (`#debug-container`, `#debug-list-panel`, `#debug-detail-panel`, `#debug-tabs`) occupies 95% of the terminal width and height with a green heavy border to visually distinguish it from the standard shell.
+
+---
+
+### 4. Integrated SDK Translation Layer
+
+The `engram_sdk` Python package includes a built-in `TranslationClient` (`engram_sdk/translation.py`) that wraps the middleware's translation API. When you call `sdk.translate()`, the SDK automatically handles protocol detection, request formatting, and response parsing. You do not need to manually construct protocol-specific payloads or define custom mappings.
+
+**How the SDK auto-resolves protocols:**
+
+```mermaid
+flowchart LR
+    A["sdk.translate(payload)"] --> B{"source_protocol\nprovided?"}
+    B -->|Yes| D["Use explicit protocols"]
+    B -->|No| C{"agent_id\nset on SDK?"}
+    C -->|Yes| E["Use agent_id as source_agent"]
+    C -->|No| F["Use first entry in\nsupported_protocols list"]
+    D & E & F --> G["POST /api/v1/translate"]
+    G --> H["TranslationResponse"]
+```
+
+**Example — explicit protocol pair:**
+
+```python
+from engram_sdk import EngramSDK
+
+sdk = EngramSDK(
+    base_url="http://localhost:8000/api/v1",
+    eat="<YOUR_EAT>",
+)
+
+result = sdk.translate(
+    {"intent": "schedule_meeting", "participants": ["alice", "bob"]},
+    source_protocol="a2a",
+    target_protocol="mcp",
+)
+
+print(result.status)   # "success"
+print(result.payload)  # Translated MCP-format payload
+print(result.mapping_suggestions)  # ML-suggested field mappings (if any)
+```
+
+**Example — agent-to-agent (protocol auto-resolved from registry):**
+
+```python
+result = sdk.translate(
+    {"intent": "schedule_meeting", "participants": ["alice", "bob"]},
+    source_agent="agent-a",
+    target_agent="agent-b",
+)
+```
+
+When `source_agent` and `target_agent` are provided, the backend looks up each agent's `supported_protocols` from the `AgentRegistry` table and determines the translation path automatically via the `ProtocolGraph` (Dijkstra shortest path).
+
+**Response structure (`TranslationResponse`):**
+
+```python
+@dataclass
+class TranslationResponse:
+    status: str                                  # "success" or "error"
+    message: str                                 # Human-readable result
+    payload: Dict[str, Any]                      # The translated payload
+    mapping_suggestions: List[MappingSuggestion]  # ML fallback suggestions
+```
+
+Each `MappingSuggestion` contains a `source_field`, `suggestion` (predicted target field name), `confidence` (float 0–1), and `applied` (bool indicating if it was auto-applied because confidence ≥ 0.85).
+
+---
+
+### 5. Production-Grade Database Migrations (Alembic)
+
+The backend uses **Alembic** for version-controlled database schema migrations, replacing the previous `SQLModel.metadata.create_all` approach.
+
+**Directory structure:**
+
+```
+alembic/
+├── env.py           # Async migration runner (uses async_engine_from_config)
+├── script.py.mako   # Migration template
+└── versions/        # Generated migration scripts (one per schema change)
+alembic.ini          # Alembic configuration (reads DATABASE_URL from settings)
+```
+
+**How it works:**
+
+1. `alembic/env.py` imports all SQLModel models from `app/db/models.py` to register them with `SQLModel.metadata`.
+2. The `target_metadata` is set to `SQLModel.metadata`, so Alembic can auto-detect schema changes.
+3. Migrations run in **async mode** using `async_engine_from_config` with the `asyncpg` driver — the same connection pool used by the application.
+4. The `DATABASE_URL` is injected from `app.core.config.settings`, ensuring migrations always target the same database as the running application.
+
+**Common commands:**
+
+```bash
+# Generate a new migration after modifying models
+alembic revision --autogenerate -m "add_new_column"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Roll back one migration
+alembic downgrade -1
+
+# Show current migration state
+alembic current
+
+# Show migration history
+alembic history
+```
+
+**Models tracked by Alembic** (defined in `app/db/models.py`):
+
+| Model | Table | Purpose |
+| :--- | :--- | :--- |
+| `ProtocolMapping` | `protocolmapping` | Source→target protocol translation rules |
+| `ProtocolVersionDelta` | `protocolversiondelta` | Version upgrade operations (rename, drop, set) |
+| `AgentRegistry` | `agentregistry` | Registered agents with protocols, tags, health status |
+| `SemanticOntology` | `semanticontology` | OWL ontology entries for semantic resolution |
+| `Task` | `task` | Queued translation tasks (JSONB payload, status, lease) |
+| `AgentMessage` | `agentmessage` | Translated messages pending agent pickup |
+| `MappingFailureLog` | `mappingfailurelog` | Failed field mappings for ML retraining |
+| `User` | `user` | User accounts with hashed passwords |
+| `PermissionProfile` | `permissionprofile` | Per-user tool permission maps |
+| `ProviderCredential` | `providercredential` | Encrypted API keys for connected providers |
+| `Workflow` | `workflow` | Multi-step workflow definitions |
+| `WorkflowSchedule` | `workflowschedule` | Cron/interval schedules for workflows |
+
+---
+
+### 6. Containerized Infrastructure (Docker Compose)
+
+The `docker-compose.yml` orchestrates the full production stack with a single command:
+
+```bash
+docker compose up --build
+```
+
+**Services defined in `docker-compose.yml`:**
+
+| Service | Image / Build | Port | Role |
+| :--- | :--- | :--- | :--- |
+| `app` | `Dockerfile` (FastAPI + uvicorn) | `8000` | Runs the FastAPI backend, TranslatorEngine, TaskWorker, and DiscoveryService |
+| `frontend` | `playground/Dockerfile` | `3000` | Vite dev server for the interactive translation playground |
+| `db` | `postgres:16-alpine` | `5432` | PostgreSQL persistent storage for all models |
+| `redis` | `redis:7.2-alpine` | `6379` | Semantic mapping cache (key pattern `semantic:equivalent:<protocol>:<concept>`) with configurable TTL (default 600s) |
+| `prometheus` | `prom/prometheus:v2.52.0` | `9090` | Scrapes `/metrics` from the FastAPI app for translation counters and latency histograms |
+| `grafana` | `grafana/grafana:10.4.2` | `3001` | Pre-provisioned dashboards from `monitoring/grafana/` for translation throughput and error rate visualization |
+
+```mermaid
+flowchart TB
+    subgraph Docker Compose Stack
+        APP["app :8000<br/>FastAPI + TaskWorker<br/>+ DiscoveryService"]
+        FE["frontend :3000<br/>Playground (Vite)"]
+        DB["db :5432<br/>PostgreSQL 16"]
+        REDIS["redis :6379<br/>Redis 7.2"]
+        PROM["prometheus :9090<br/>Metrics Scraper"]
+        GRAF["grafana :3001<br/>Dashboards"]
+    end
+
+    APP --> DB
+    APP --> REDIS
+    PROM -->|"scrape /metrics"| APP
+    GRAF --> PROM
+    FE --> APP
+
+    style APP fill:#132019,stroke:#2bdc8d
+    style DB fill:#1a1a2e,stroke:#4285F4
+    style REDIS fill:#2d1a1a,stroke:#FF4E00
+    style PROM fill:#1a1a1a,stroke:#e6e1d7
+    style GRAF fill:#1a1a1a,stroke:#e0b15b
+    style FE fill:#1a1a1a,stroke:#FF9966
+```
+
+All services are connected via the `agent_network` bridge network. PostgreSQL data persists across restarts via the `postgres_data` named volume.
+
+**Staging environment** (adds WireMock for mocking external agent endpoints):
+
+```bash
+docker compose -f docker-compose.staging.yml up --build -d
+```
+
+**Environment variables** consumed from `.env`:
+
+| Variable | Default | Used By |
+| :--- | :--- | :--- |
+| `POSTGRES_USER` | `admin` | `db` service + `app` connection string |
+| `POSTGRES_PASSWORD` | `password` | `db` service + `app` connection string |
+| `POSTGRES_DB` | `translator_db` | `db` service + `app` connection string |
+| `GRAFANA_ADMIN_USER` | `admin` | Grafana login |
+| `GRAFANA_ADMIN_PASSWORD` | `admin` | Grafana login |
+| `GRAFANA_SMTP_*` | — | Email alerting from Grafana |
+
+---
+
+### 7. Visual Branding & Startup Screen
+
+The TUI displays a clean, standard-font **ENGRAM** typographic logo on startup via the `WelcomeScreen` class. The logo uses an ASCII block font rendered in the `#FF9966` (orange) color.
+
+```
+  _____   _   _    ____   ____       _      __  __ 
+ | ____| | \ | |  / ___| |  _ \     / \    |  \/  |
+ |  _|   |  \| | | |  _  | |_) |   / _ \   | |\/| |
+ | |___  | |\  | | |_| | |  _ <   / ___ \  | |  | |
+ |_____| |_| \_|  \____| |_| \_\ /_/   \_\ |_|  |_|
+```
+
+The `WelcomeScreen` provides two entry paths:
+
+- **"Start Bridging"** — Pops the welcome screen and drops the user into the main shell.
+- **"Setup API Keys"** — Pushes `ProviderSelectionScreen` onto the stack to configure AI provider credentials before entering the shell.
+
+The main shell header reuses the same logo with the tagline `Universal Protocol Bridge` rendered in dim text below it.
+
+---
+
+### 8. Agent Heartbeat (Periodic Discovery Service)
+
+The `DiscoveryService` (`app/services/discovery.py`) runs a background loop that pings every registered agent's `/health` endpoint on a configurable interval (default: **60 seconds**).
+
+**How the heartbeat loop works:**
+
+```mermaid
+sequenceDiagram
+    loop Every 60 seconds
+        DiscoveryService->>DB: SELECT * FROM agentregistry
+        DB-->>DiscoveryService: List of all agents
+        par For each agent
+            DiscoveryService->>Agent: GET {endpoint_url}/health
+            alt HTTP 200
+                Agent-->>DiscoveryService: OK
+                DiscoveryService->>DB: SET is_active=true, last_seen=now()
+            else Timeout / Error / Non-200
+                DiscoveryService->>DB: SET is_active=false, last_seen=now()
+            end
+        end
+        DiscoveryService->>DB: COMMIT
+    end
+```
+
+**Implementation details:**
+
+| Parameter | Value | Description |
+| :--- | :--- | :--- |
+| `ping_interval` | `60` seconds (constructor arg) | Time between full discovery cycles |
+| `ping_timeout` | `5` seconds (constructor arg) | Per-agent HTTP timeout via `aiohttp.ClientTimeout` |
+| `DEFAULT_HEALTH_PATH` | `/health` | Appended to the agent's `endpoint_url` |
+| Concurrency | `asyncio.gather(*tasks)` | All agents are pinged concurrently within each cycle |
+
+When an agent's status changes (online → offline or vice versa), the service logs the transition:
+
+```
+DiscoveryService: Agent status changed | agent_id=agent-a | status=OFFLINE
+```
+
+The service is started automatically on application boot via `start_periodic_discovery()` and stopped gracefully with `stop_periodic_discovery()` on shutdown (cancels the background `asyncio.Task`).
+
+**Why this matters:** Inactive agents are excluded from the collaborator search results. The `TaskWorker` will not route tasks to agents marked `is_active=false`, preventing message delivery to dead endpoints.
+
+---
+
+### 9. Agent Compatibility Scoring & Matchmaking
+
+The `GET /api/v1/discovery/collaborators` endpoint returns a ranked list of agents sorted by a **compatibility score**. This score quantifies how well a candidate agent can interoperate with the requesting agent.
+
+**The compatibility formula:**
+
+$$Score = \frac{\text{Shared Protocols} + \text{Mappable Protocols}}{\text{Total Candidate Protocols}}$$
+
+| Term | Definition |
+| :--- | :--- |
+| **Shared Protocols** | Protocols that both the requesting agent and the candidate agent support natively (e.g., both speak `MCP`) |
+| **Mappable Protocols** | Protocols the candidate supports that the requesting agent does not, but which the `TranslatorEngine` can translate to from one of the requester's protocols (determined by `ProtocolMapping` rows in the database) |
+| **Total Candidate Protocols** | The total number of protocols the candidate agent supports |
+
+**Example:**
+
+Your agent speaks `A2A`. A candidate agent speaks `A2A`, `MCP`, and `ACP`. The database has a `ProtocolMapping` row for `A2A → MCP`, but not `A2A → ACP`.
+
+```
+shared     = {A2A}         → count = 1
+mappable   = {MCP}         → count = 1  (A2A→MCP exists)
+total      = {A2A,MCP,ACP} → count = 3
+
+score = (1 + 1) / 3 = 0.6667
+```
+
+**API usage:**
+
+```bash
+# Find agents compatible with an A2A-speaking agent, minimum score 0.5
+curl "http://localhost:8000/api/v1/discovery/collaborators?protocols=A2A&min_score=0.5" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response:**
+
+```json
+[
+  {
+    "agent_id": "agent-scheduler",
+    "endpoint_url": "http://agent-scheduler:8080",
+    "supported_protocols": ["a2a", "mcp"],
+    "is_active": true,
+    "compatibility_score": 1.0,
+    "shared_protocols": ["A2A"],
+    "mappable_protocols": ["MCP"]
+  },
+  {
+    "agent_id": "agent-weather",
+    "endpoint_url": "http://agent-weather:8081",
+    "supported_protocols": ["mcp", "acp"],
+    "is_active": true,
+    "compatibility_score": 0.5,
+    "shared_protocols": [],
+    "mappable_protocols": ["MCP"]
+  }
+]
+```
+
+**Implementation:** `DiscoveryService.find_collaborators()` in `app/services/discovery.py`. Only agents with `is_active=true` are considered. Results are sorted by `compatibility_score` descending. The `min_score` query parameter (default `0.7`, range `0.0–1.0`) filters out low-compatibility candidates.
+
+---
+
+### 10. Semantic Tag Filtering
+
+Agents can register with **semantic tags** — a list of capability keywords (e.g., `["weather", "scheduling", "search"]`). The discovery endpoints use these tags to filter agents by functional capability, not just protocol compatibility.
+
+**Registering an agent with semantic tags:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "agent-weather",
+    "endpoint_url": "http://agent-weather:8081",
+    "supported_protocols": ["mcp"],
+    "semantic_tags": ["weather", "forecast", "geo"],
+    "is_active": true
+  }'
+```
+
+**Discovering agents filtered by tags:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/discovery/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{
+    "protocols": ["a2a"],
+    "semantic_tags": ["weather"]
+  }'
+```
+
+This `POST /api/v1/discovery/` endpoint applies **two filters**:
+
+1. **Protocol eligibility** — Returns agents whose `supported_protocols` overlap with the requested protocols or protocols reachable via `ProtocolMapping` translations.
+2. **Semantic tag overlap** — Filters the eligible agents to only those whose `semantic_tags` array has at least one element in common with the requested tags. This uses PostgreSQL's `ARRAY && ARRAY` (overlap) operator via SQLAlchemy's `.overlap()`.
+
+**How the two-stage filter works:**
+
+```mermaid
+flowchart TD
+    A["Request:<br/>protocols=[A2A]<br/>semantic_tags=[weather]"] --> B["Query ProtocolMapping<br/>for A2A → ???"]
+    B --> C["Eligible protocols:<br/>{A2A, MCP}"]
+    C --> D["SELECT FROM agentregistry<br/>WHERE supported_protocols<br/>OVERLAP {A2A, MCP}"]
+    D --> E["Apply tag filter:<br/>WHERE semantic_tags<br/>OVERLAP {weather}"]
+    E --> F["Return matching agents"]
+```
+
+**SDK usage:**
+
+```python
+from engram_sdk import EngramSDK
+
+sdk = EngramSDK(
+    base_url="http://localhost:8000/api/v1",
+    eat="<YOUR_EAT>",
+    agent_id="my-agent",
+    endpoint_url="http://localhost:9000",
+    supported_protocols=["a2a"],
+    semantic_tags=["scheduling", "calendar"],
+)
+
+# Register this agent with its tags
+sdk.register_agent()
+```
+
+Tags are stored as a PostgreSQL `ARRAY` column on the `AgentRegistry` model. There is no predefined tag vocabulary — agents define their own tags during registration, and discovery consumers query against them freely.
+
+---
+
 ## Core Features
 
 *   **Protocol Translation:** Converts messages and payloads between A2A, MCP, and ACP formats.
