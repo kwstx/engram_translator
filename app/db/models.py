@@ -84,7 +84,7 @@ class AgentRegistry(SQLModel, table=True):
         sa_column=Column(ARRAY(String))
     )
     capabilities: List[str] = Field(
-        default=[],
+        default=[], 
         sa_column=Column(ARRAY(String))
     )
     semantic_tags: List[str] = Field(
@@ -92,8 +92,13 @@ class AgentRegistry(SQLModel, table=True):
         sa_column=Column(ARRAY(String))
     )
     endpoint_url: str = Field(nullable=False)
+    documentation_url: Optional[str] = Field(default=None) # OpenAPI or documentation URL
     last_seen: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    last_scraped: Optional[datetime] = Field(
+        default=None,
         sa_column=Column(DateTime(timezone=True)),
     )
     is_active: bool = Field(default=True)

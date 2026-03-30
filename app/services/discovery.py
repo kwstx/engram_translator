@@ -111,7 +111,6 @@ class DiscoveryService:
                         )
 
             except asyncio.CancelledError:
-                logger.info("DiscoveryService: Ping loop cancelled.")
                 break
             except Exception as e:
                 logger.error(
@@ -163,6 +162,12 @@ class DiscoveryService:
                 agent_id=str(agent.agent_id),
                 error=str(e),
             )
+
+        # Integration with DynamicRuleSynthesizer for self-healing mapping
+        if is_active and agent.documentation_url:
+            from app.semantic.dynamic_rule_synthesizer import DynamicRuleSynthesizer
+            synthesizer = DynamicRuleSynthesizer(db_session)
+            await synthesizer.sync_agent(agent)
 
         # Update agent status in registry
         previous_status = agent.is_active

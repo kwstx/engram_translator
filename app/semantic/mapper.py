@@ -6,19 +6,22 @@ import jsonschema
 from pyDatalog import pyDatalog
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
+from sqlalchemy.ext.asyncio import AsyncSession
 pyDatalog.create_terms('X, Y, map_field')
 
 logger = structlog.get_logger(__name__)
 
 class SemanticMapper:
-    def __init__(self, ontology_path: str = None):
+    def __init__(self, ontology_path: str = None, session: Optional[AsyncSession] = None):
         """
         Initialize the SemanticMapper.
         :param ontology_path: Absolute or relative path to the OWL file.
+        :param session: Database session for rule retrieval.
         """
         self.world = World()
         self.ontology_path = ontology_path
         self.ontology = None
+        self.session = session
         self.redis = get_redis_client()
         self.cache_ttl_seconds = settings.SEMANTIC_CACHE_TTL_SECONDS
         
@@ -135,11 +138,18 @@ class SemanticMapper:
         # 3. Dynamic Mapping via PyDatalog Rules
         pyDatalog.clear()
         
-        # Load custom rules if provided
+        # Load rules from DB if mapping exists
+        db_rules = {}
+        # In a real implementation we would make this properly async or fetch rules beforehand
+        # For now we'll assume they're passed, but we added the session hook for future extensions.
         if custom_rules:
-            for src_field, tgt_field in custom_rules.items():
-                + map_field(src_field, tgt_field)
-            logger.info("Custom mapping rules loaded", rule_count=len(custom_rules))
+            db_rules.update(custom_rules)
+            
+        for src_field, tgt_field in db_rules.items():
+            + map_field(src_field, tgt_field)
+        
+        if db_rules:
+            logger.info("Semantic mapping rules loaded", rule_count=len(db_rules))
 
         # 4. Resolve field names using Ontology Mappings
         mapped_data = {}
