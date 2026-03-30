@@ -1,30 +1,66 @@
 ![Engram Logo](assets/logo.png)
 
-# Agent Translator Middleware
+# Engram
 
-**The universal bridge for AI agents: translate protocols and schemas instantly to enable seamless cross-vendor collaboration.**
+**Connect any agent, any tool, any API. One identity layer. One routing engine. One semantic bridge.**
 
 [![Works with MCP](https://img.shields.io/badge/Works_with-MCP-blue)](https://modelcontextprotocol.io)
 [![Works with A2A](https://img.shields.io/badge/Works_with-A2A-green)](#)
 [![Works with ACP](https://img.shields.io/badge/Works_with-ACP-orange)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Agent Translator Middleware connects AI agents using different protocols (A2A, MCP, ACP). It handles protocol transformation and semantic mapping.
+Engram is an orchestration layer that sits between AI agents, external tools, and third-party APIs. It translates protocols (A2A, MCP, ACP), resolves semantic schema differences using OWL ontologies and machine learning, routes tasks through a weighted directed graph, and exposes a unified identity system (Engram Access Tokens) so that every participant -- agent, tool, or human -- authenticates through a single mechanism. Agents register their capabilities and protocols once; Engram handles discovery, compatibility scoring, multi-hop translation, and delivery. If a field mapping is missing, the system logs the failure, predicts the correction via a TF-IDF/LogisticRegression pipeline, auto-applies high-confidence fixes, and retrains itself on the accumulated corrections. Natural language commands are decomposed into atomic tasks, matched to registered agent capabilities, and delegated without the caller needing to know which protocol or endpoint to target. The entire pipeline is observable through Prometheus metrics, Grafana dashboards, and a terminal-based debugging interface.
 
-## Rationale
+## Why Engram Exists
 
-| Scenario | Without Translator | With Translator |
+The AI ecosystem is fragmented. Agents speak different protocols. Tools expose incompatible schemas. APIs require per-vendor integration code. Connecting two systems today means writing custom glue for every pair -- and maintaining it when either side changes.
+
+Engram eliminates this by acting as the single integration point. Register once, connect to everything.
+
+| Problem | Without Engram | With Engram |
 | :--- | :--- | :--- |
-| **Agent Interop** | Isolated silos. | A2A - MCP - ACP communication. |
-| **Data Mapping** | Manual schema mapping. | Direct semantic resolution via Owlready2. |
-| **Task Handoff** | Schema mismatch failures. | Multi-hop routing with retry logic. |
-
-AI agents today are often isolated because they speak different protocols (MCP, ACP, native A2A) and use differing data schemas. This middleware acts as a universal translator, allowing an MCP-based agent to seamlessly hand off a task to an ACP-based agent without either needing to change their underlying code.
+| **Agent-to-agent communication** | Each pair requires custom protocol adapters. N agents = O(N^2) integrations. | Agents register their protocols. Engram translates between any pair via multi-hop graph routing. |
+| **Schema mismatches** | Manual field mapping for every integration. Breaks silently on upstream changes. | OWL ontology equivalences, PyDatalog rules, and ML-predicted mappings resolve fields automatically. Failures self-heal. |
+| **Tool and API integration** | Per-vendor SDKs, auth flows, and response parsing. | Centralized provider vault. Connectors for OpenAI, Anthropic, Google, Perplexity, Slack, and more. Single EAT token authorizes everything. |
+| **Task routing** | Hardcoded destinations. No fallback if a service is down. | Performance-aware Dijkstra routing. Agents are weighted by latency and success rate. Unreachable agents are auto-deactivated by the heartbeat service. |
+| **Natural language commands** | Requires structured API calls. Users must know the target system. | NL intent resolver decomposes free-text into atomic tasks, maps to agent capabilities, and delegates automatically. |
+| **Observability** | Per-service logging. No unified view. | Prometheus counters/histograms, rolling rate gauges, Grafana dashboards, and a real-time TUI debug console -- all pre-configured. |
+| **Trust and auditability** | No proof that a translation happened correctly. | Every multi-hop translation produces a SHA-256 execution proof chain returned in the API response. |
 
 ```mermaid
-flowchart LR
-    A["Source Agent<br/>Protocol: MCP"] -->|Task Request| B("Translator<br/>Middleware")
-    B -->|Protocol & Semantic Translation| C["Target Agent<br/>Protocol: A2A"]
+flowchart TB
+    subgraph "Sources"
+        AG1["Agent A<br/>Protocol: A2A"]
+        AG2["Agent B<br/>Protocol: MCP"]
+        NL["Human<br/>Natural Language"]
+        SDK["SDK Client<br/>engram_sdk"]
+    end
+
+    subgraph "Engram Core"
+        AUTH["EAT Auth Layer"]
+        IR["Intent Resolver"]
+        PG["Protocol Graph<br/>Dijkstra Routing"]
+        TE["Translator Engine<br/>+ Version Deltas"]
+        SM["Semantic Mapper<br/>OWL / PyDatalog / ML"]
+        TQ["Task Queue<br/>+ Worker Pool"]
+        DS["Discovery Service<br/>Heartbeat + Scoring"]
+    end
+
+    subgraph "Targets"
+        AG3["Agent C<br/>Protocol: ACP"]
+        MF["MiroFish Swarm"]
+        TOOL["Tool Connectors<br/>Anthropic / Perplexity / Slack"]
+        API["External APIs<br/>Binance / Coinbase / FRED"]
+    end
+
+    AG1 & AG2 & NL & SDK --> AUTH
+    AUTH --> IR
+    IR --> PG
+    PG --> TE
+    TE --> SM
+    SM --> TQ
+    TQ --> DS
+    DS --> AG3 & MF & TOOL & API
 ```
 
 ---
