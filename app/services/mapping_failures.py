@@ -109,3 +109,65 @@ async def apply_ml_suggestion(
     mapping.semantic_equivalents = semantic
     entry.applied = True
     return entry
+
+
+async def correct_mapping_failure(
+    session,
+    *,
+    id: str,
+    correct_suggestion: str,
+    auto_retrain: bool = True,
+) -> Optional[MappingFailureLog]:
+    """Manually apply a correct suggestion to a logged mapping failure."""
+    from app.services.ml_retraining import retrain_mapping_model
+    
+    stmt = select(MappingFailureLog).where(MappingFailureLog.id == id)
+    result = await session.execute(stmt)
+    entry = result.scalars().first()
+    if not entry:
+        return None
+
+    try:
+        proto_enum = ProtocolType[entry.source_protocol.upper()]
+    except KeyError:
+        return entry
+
+    # Update ProtocolMapping
+    result = await session.execute(
+        select(ProtocolMapping).where(
+            (ProtocolMapping.source_protocol == proto_enum)
+            & (ProtocolMapping.target_protocol == entry.target_protocol.upper())
+        )
+    )
+    mapping = result.scalars().first()
+    if not mapping:
+        mapping = ProtocolMapping(
+            source_protocol=proto_enum,
+            target_protocol=entry.target_protocol.upper(),
+            mapping_rules={},
+            semantic_equivalents={},
+        )
+        session.add(mapping)
+
+    semantic = mapping.semantic_equivalents or {}
+    semantic[entry.source_field] = correct_suggestion
+    mapping.semantic_equivalents = semantic
+    
+    # Update failure log
+    entry.model_suggestion = correct_suggestion
+    entry.applied = True
+    
+    # Near real-time retraining trigger
+    if auto_retrain:
+         from sqlmodel import func
+         # Simple heuristic: if we have N applied failures, trigger retrain
+         count_stmt = select(func.count()).select_from(MappingFailureLog).where(MappingFailureLog.applied == True)
+         count_res = await session.execute(count_stmt)
+         applied_count = count_res.scalar() or 0
+         
+         if applied_count > 0 and applied_count % settings.ML_AUTO_RETRAIN_THRESHOLD == 0:
+             # We trigger this asynchronously or just call it here (it's fast enough for small sets)
+             # Better to do it after commit, but for now we'll do it here
+             await retrain_mapping_model(session)
+    
+    return entry

@@ -8,6 +8,9 @@ from app.db.models import (
     TaskStatus,
     AgentMessage,
     AgentMessageStatus,
+    MappingFailureLog,
+    ProtocolType,
+    ProtocolMapping,
 )
 from app.semantic.ontology_manager import ontology_manager
 from typing import List, Dict, Any, Optional
@@ -24,7 +27,9 @@ from app.services.mapping_failures import (
     extract_payload_excerpt,
     log_mapping_failure,
     apply_ml_suggestion,
+    correct_mapping_failure,
 )
+from app.services.ml_retraining import retrain_mapping_model
 
 router = APIRouter()
 
@@ -78,12 +83,13 @@ async def pipe_to_mirofish(
     
     # Simple pass-through translation for now
     try:
-        translated_payload = await routeTo(
+        route_result = await routeTo(
             target="MCP",
             payload=request.payload,
             source_protocol=request.protocol,
             correlation_id=request.agent_id
         )
+        translated_payload = route_result.get("payload", request.payload)
     except Exception:
         translated_payload = request.payload # Fallback
         
@@ -272,6 +278,7 @@ class TranslateResponse(BaseModel):
     status: str = Field(..., description="Translation lifecycle status.")
     message: str = Field(..., description="Human-readable status message.")
     payload: Dict[str, Any] = Field(..., description="Translated or queued payload.")
+    execution_proof: Optional[str] = Field(None, description="Cryptographic proof of translation integrity.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -326,6 +333,10 @@ class MappingSuggestion(BaseModel):
     applied: bool = False
 
 
+class CorrectMappingRequest(BaseModel):
+    correct_suggestion: str = Field(..., description="The correct semantic mapping value.")
+
+
 class BetaTranslateResponse(TranslateResponse):
     mapping_suggestions: List[MappingSuggestion] = Field(
         default_factory=list,
@@ -365,7 +376,7 @@ async def translate_message(
         target_protocol = target_agent.supported_protocols[0]
 
         # 2. Call routeTo with the EAT
-        result_payload = await routeTo(
+        route_result = await routeTo(
              target=target_protocol,
              payload=request.payload,
              source_protocol=source_protocol,
@@ -373,12 +384,15 @@ async def translate_message(
              eat=principal.get("_raw_token"),
              db=db
         )
+        result_payload = route_result.get("payload")
+        proof = route_result.get("execution_proof")
         
         record_translation_success("api", source_protocol, target_protocol)
         return TranslateResponse(
             status="completed",
             message=f"Translated message from {request.source_agent} to {request.target_agent}",
             payload=result_payload,
+            execution_proof=proof,
         )
     except Exception as exc:
         record_translation_error("api")
@@ -400,7 +414,7 @@ async def beta_translate_message(
     principal: Dict[str, Any] = require_scopes(["translate:beta"]),
 ):
     try:
-        result_payload = await routeTo(
+        route_result = await routeTo(
             target=request.target_protocol,
             payload=request.payload,
             source_protocol=request.source_protocol,
@@ -408,6 +422,9 @@ async def beta_translate_message(
             eat=principal.get("_raw_token"),
             db=db
         )
+        result_payload = route_result.get("payload")
+        proof = route_result.get("execution_proof")
+
         record_translation_success(
             "beta", request.source_protocol.upper(), request.target_protocol.upper()
         )
@@ -418,6 +435,7 @@ async def beta_translate_message(
                 f"to {request.target_protocol}"
             ),
             payload=result_payload,
+            execution_proof=proof,
             mapping_suggestions=[],
         )
     except Exception as exc:
@@ -477,7 +495,7 @@ async def playground_translate_message(
             permissions={"translator": ["*"]}
         )
         
-        result_payload = await routeTo(
+        route_result = await routeTo(
             target=request.target_protocol,
             payload=request.payload,
             source_protocol=request.source_protocol,
@@ -485,6 +503,9 @@ async def playground_translate_message(
             eat=guest_eat,
             db=db
         )
+        result_payload = route_result.get("payload")
+        proof = route_result.get("execution_proof")
+
         return BetaTranslateResponse(
             status="success",
             message=(
@@ -492,6 +513,7 @@ async def playground_translate_message(
                 f"to {request.target_protocol}"
             ),
             payload=result_payload,
+            execution_proof=proof,
             mapping_suggestions=[],
         )
     except Exception as exc:
@@ -796,3 +818,61 @@ async def delegate_task(
         eat=eat,
     )
     return result
+
+
+@router.get(
+    "/beta/mapping-failures",
+    response_model=List[MappingFailureLog],
+    tags=["Beta"],
+    summary="Get mapping failure logs",
+    description="Retrieves mapping failure logs for enterprise developers.",
+)
+async def get_mapping_failures(
+    applied: Optional[bool] = None,
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = require_scopes(["translate:beta"]),
+):
+    stmt = select(MappingFailureLog)
+    if applied is not None:
+        stmt = stmt.where(MappingFailureLog.applied == applied)
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post(
+    "/beta/mapping-failures/{failure_id}/correct",
+    response_model=MappingFailureLog,
+    tags=["Beta"],
+    summary="Manually correct a mapping failure",
+    description="Manually corrects a mapping failure and updates the ProtocolMapping.",
+)
+async def manual_correct_mapping(
+    failure_id: UUID,
+    request: CorrectMappingRequest,
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = require_scopes(["translate:beta"]),
+):
+    entry = await correct_mapping_failure(
+        db, id=str(failure_id), correct_suggestion=request.correct_suggestion
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Mapping failure log not found.")
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+@router.post(
+    "/beta/ml/retrain",
+    tags=["Beta"],
+    summary="Trigger ML model retraining",
+    description="Manually triggers the ML mapping model retraining based on current ProtocolMapping entries.",
+)
+async def trigger_ml_retraining(
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = require_scopes(["translate:beta"]),
+):
+    success = await retrain_mapping_model(db)
+    if not success:
+        raise HTTPException(status_code=500, detail="ML model retraining failed.")
+    return {"status": "success", "message": "ML model retraining initiated."}

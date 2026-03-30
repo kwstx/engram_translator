@@ -34,4 +34,8 @@ async def routeTo(
         db=db
     )
     
-    return result.translated_message
+    # Return both the payload and the verification proof
+    return {
+        "payload": result.translated_message,
+        "execution_proof": result.proof
+    }

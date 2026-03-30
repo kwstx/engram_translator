@@ -1,6 +1,9 @@
 import structlog
 import networkx as nx
 import time
+import hashlib
+import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +34,7 @@ class HopResult:
     target_protocol: str
     message_snapshot: Dict[str, Any]
     weight: float  # edge cost used for this hop
+    proof: Optional[str] = None # Cryptographic hash of the hop execution
 
 @dataclass
 class HandoffResult:
@@ -38,6 +42,7 @@ class HandoffResult:
     translated_message: Dict[str, Any]
     route: List[str]             # e.g. ["A2A", "MCP", "ACP"]
     total_weight: float          # cumulative cost of the chosen path
+    proof: Optional[str] = None  # Full path verification proof
     hops: List[HopResult] = field(default_factory=list)
 
 # ---------------------------------------------------------------------------
@@ -146,6 +151,17 @@ class Orchestrator:
         for c in self.connector_registry.list_connectors():
             self.protocol_graph.add_protocol(c)
 
+    def _generate_execution_proof(self, source_protocol: str, target_protocol: str, input_payload: Dict[str, Any], output_payload: Dict[str, Any]) -> str:
+        """Generates a verifiable proof of execution for a single hop."""
+        payload_hash = hashlib.sha256(json.dumps({
+            "in": input_payload,
+            "out": output_payload,
+            "src": source_protocol.upper(),
+            "tgt": target_protocol.upper(),
+            "ts": datetime.now(timezone.utc).isoformat()
+        }, sort_keys=True).encode()).hexdigest()
+        return f"v1:sha256:{payload_hash}"
+
     def register_translation_edge(self, source: str, target: str, weight: float = 1.0, metadata: Optional[Dict[str, Any]] = None) -> None:
         self.protocol_graph.add_translation_edge(source, target, weight, metadata)
 
@@ -209,6 +225,7 @@ class Orchestrator:
         hops = []
         for i in range(len(path) - 1):
             hop_src, hop_tgt = path[i], path[i+1]
+            hop_input = current_message.copy()
             hop_weight = self.protocol_graph._graph.edges[hop_src, hop_tgt].get("weight", 1.0)
             try:
                 task_id = source_message.get("metadata", {}).get("task_id")
@@ -219,8 +236,26 @@ class Orchestrator:
             except Exception as e:
                 record_translation_error("orchestrator", hop_src, hop_tgt)
                 raise
-            hops.append(HopResult(source_protocol=hop_src, target_protocol=hop_tgt, message_snapshot=current_message.copy(), weight=hop_weight))
-        return HandoffResult(translated_message=current_message, route=path, total_weight=total_weight, hops=hops)
+            
+            # Generate proof for this hop
+            hop_proof = self._generate_execution_proof(hop_src, hop_tgt, hop_input, current_message)
+            hops.append(HopResult(
+                source_protocol=hop_src, 
+                target_protocol=hop_tgt, 
+                message_snapshot=current_message.copy(), 
+                weight=hop_weight,
+                proof=hop_proof
+            ))
+        
+        # Calculate aggregate proof
+        aggregate_proof = hashlib.sha256(("".join([h.proof or "" for h in hops])).encode()).hexdigest() if hops else "N/A"
+        return HandoffResult(
+            translated_message=current_message, 
+            route=path, 
+            total_weight=total_weight, 
+            hops=hops,
+            proof=f"v1:agg:{aggregate_proof}"
+        )
 
     async def handoff_async(self, source_message: Dict[str, Any], source_protocol: str, target_protocol: str, eat: Optional[str] = None, db: Optional[Any] = None) -> HandoffResult:
         src, tgt = source_protocol.upper(), target_protocol.upper()

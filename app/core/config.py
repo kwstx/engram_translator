@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     ML_MODEL_PATH: str = "app/semantic/models/mapping_model.joblib"
     ML_MIN_TRAIN_SAMPLES: int = 20
     ML_AUTO_APPLY_THRESHOLD: float = 0.85
+    ML_AUTO_RETRAIN_THRESHOLD: int = 5 # Number of corrections before auto-retrain
     MAPPING_FAILURE_MAX_FIELDS: int = 50
     MAPPING_FAILURE_PAYLOAD_MAX_KEYS: int = 50
     
