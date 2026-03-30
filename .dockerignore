@@ -1,10 +1,10 @@
-# Ignore direct environment directories
+# Environments
 venv/
 .venv/
 env/
 .env/
 
-# Ignore dependency directories
+# Dependencies
 node_modules/
 dist/
 build/
@@ -14,24 +14,27 @@ build/
 .coverage
 htmlcov/
 
-# Ignore Python specific
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# Ignore metadata
+# Metadata
 .git/
 .github/
 .vscode/
 .idea/
 
-# Ignore logs and temp
+# Logs, Results & Temp
 *.log
 *.tmp
-out.txt
+*.txt
+*.db
 *.out
-debug_*.txt
-test_result.txt
-final_*.txt
+playground/
+tests/integration/*.js
+scripts/*.js
+*.db-journal
+*.sqlite3
