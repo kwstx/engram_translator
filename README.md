@@ -47,7 +47,7 @@ Open `http://localhost:8000/docs` for the Swagger UI. The full stack (PostgreSQL
 Upgrading? `git pull && docker compose up --build -d`.
 
 <p align="center">
-  <img src="assets/tui_welcome.jpg" alt="Engram TUI Welcome Screen" width="720">
+  <img src="assets/tui_welcome.png" alt="Engram TUI Welcome Screen" width="720">
 </p>
 
 ---
@@ -116,7 +116,7 @@ curl -X POST http://localhost:8000/api/v1/delegate \
 | **Prometheus + Grafana** | `GET /metrics` endpoint. Pre-configured dashboards in `monitoring/grafana/`. |
 
 <p align="center">
-  <img src="assets/tui_dashboard.jpg" alt="Engram TUI Dashboard" width="720">
+  <img src="assets/tui_dashboard.png" alt="Engram TUI Dashboard" width="720">
 </p>
 
 ### Protocol Layer
@@ -258,7 +258,7 @@ flowchart TD
 Each connection screen inherits from `BaseServiceConnectScreen`, which handles the `POST /credentials` call to the backend and stores the credential locally via `VaultService`. The connection is provider-specific: it sends the `provider_name`, `credential_type` (either `api_key` or `oauth`), and the raw token as encrypted metadata.
 
 <p align="center">
-  <img src="assets/tui_provider_connect.jpg" alt="Engram TUI Provider Connection Screen" width="720">
+  <img src="assets/tui_provider_connect.png" alt="Engram TUI Provider Connection Screen" width="720">
 </p>
 
 ---
