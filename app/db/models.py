@@ -161,6 +161,62 @@ class ToolRegistry(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
     )
 
+    execution_metadata: Optional["ToolExecutionMetadata"] = Relationship(
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
+        back_populates="tool"
+    )
+
+
+class ExecutionType(str, enum.Enum):
+    MCP = "MCP"
+    CLI = "CLI"
+    HTTP = "HTTP"
+
+
+class ToolExecutionMetadata(SQLModel, table=True):
+    __tablename__ = "tool_execution_metadata"
+    
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tool_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("tool_registry.id"), index=True, nullable=False, unique=True)
+    )
+    tool: "ToolRegistry" = Relationship(back_populates="execution_metadata")
+    
+    execution_type: ExecutionType = Field(
+        sa_column=Column(Enum(ExecutionType), index=True, nullable=False)
+    )
+    
+    # Stores spec (OpenAPI/GraphQL), CLI wrapper info, or MCP details
+    metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    
+    # Secure storage for CLI wrapper scripts/templates
+    cli_wrapper: Optional[str] = Field(default=None)
+    
+    # Docker config for CLI/Isolated execution
+    docker_image: Optional[str] = Field(default=None)
+    docker_config: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+    
+    # Auth mapping: e.g., {"api_key_header": "X-API-Key", "env_vars": {"AUTH_TOKEN": "EAT"}}
+    auth_config: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)),
+    )
+
 
 class SemanticOntology(SQLModel, table=True):
     __tablename__ = "semantic_ontology"

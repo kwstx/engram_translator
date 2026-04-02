@@ -32,6 +32,7 @@ from app.api.v1 import (
     orchestration,
     tasks,
     workflows,
+    registry,
 )
 from bridge.memory import router as memory_router
 from app.core.config import settings
@@ -136,6 +137,7 @@ app.include_router(credentials.router, prefix=settings.API_V1_STR + "/credential
 app.include_router(orchestration.router, prefix=settings.API_V1_STR, tags=["Orchestration"])
 app.include_router(tasks.router, prefix=settings.API_V1_STR + "/tasks", tags=["Tasks"])
 app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows"])
+app.include_router(registry.router, prefix=settings.API_V1_STR, tags=["Registry"])
 app.include_router(memory_router, prefix=settings.API_V1_STR)
 
 
