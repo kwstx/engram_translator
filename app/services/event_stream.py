@@ -72,10 +72,25 @@ class EventStream:
             logger.warning("Failed to read from event stream", error=str(exc))
             return []
 
-    def ack(self, event_id: str) -> None:
+    async def ack(self, event_id: str) -> None:
         if not self.redis:
             return
         try:
             self.redis.xack(self.stream_key, self.group_name, event_id)
         except Exception as exc:
             logger.warning("Failed to ack event", event_id=event_id, error=str(exc))
+
+    def get_recent_events(self, count: int = 50) -> List[Dict[str, Any]]:
+        if not self.redis:
+            return []
+        try:
+            result = self.redis.xrevrange(self.stream_key, count=count)
+            events: List[Dict[str, Any]] = []
+            for event_id, data in result:
+                event = dict(data)
+                event["event_id"] = event_id
+                events.append(event)
+            return events
+        except Exception as exc:
+            logger.warning("Failed to fetch recent events", error=str(exc))
+            return []

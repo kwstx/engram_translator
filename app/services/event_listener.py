@@ -259,6 +259,12 @@ class EventListener:
                         ),
                     )
 
+    def get_active_listeners(self) -> Dict[str, Any]:
+        return {
+            "polling": self.polling.get_active_polls(),
+            "cli_watch": self.cli_watch.get_active_watches(),
+        }
+
     async def _ingest_event(
         self,
         *,

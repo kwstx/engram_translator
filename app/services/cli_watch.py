@@ -32,6 +32,15 @@ class CLIWatchManager:
             task.cancel()
         self._tasks.clear()
 
+    def get_active_watches(self) -> dict[str, Any]:
+        return {
+            watch_id: {
+                "watch_id": watch_id,
+                "status": "running" if not task.done() else "stopped",
+            }
+            for watch_id, task in self._tasks.items()
+        }
+
     async def _run_watch(self, watch_id: str, command: str, args: list[str], on_event):
         try:
             proc = await asyncio.create_subprocess_exec(

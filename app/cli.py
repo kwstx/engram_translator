@@ -14,7 +14,7 @@ import httpx
 import keyring
 import jwt
 from pydantic import BaseModel, Field, HttpUrl
-import rich.box
+from rich import box
 from rich.json import JSON
 from rich.console import Console
 from rich.panel import Panel
@@ -22,6 +22,7 @@ from rich.table import Table
 from rich.tree import Tree
 from rich import print as rprint
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.text import Text
 
 # Constants
 APP_NAME = "engram"
@@ -771,6 +772,131 @@ def route_list():
 
     except Exception as e:
         rprint(f"[bold red]List Failed:[/] {e}")
+
+
+
+# --- Sync Subgroup ---
+sync_app = typer.Typer(help="Manage bidirectional synchronization and event monitoring")
+app.add_typer(sync_app, name="sync")
+
+@sync_app.command("list")
+def sync_list():
+    """
+    List active event listeners, pollers, and CLI watchers.
+    """
+    try:
+        response = state.request("GET", "/events/listeners")
+        if response.status_code != 200:
+            state.handle_auth_error(response)
+            return
+
+        data = response.json()
+        table = Table(title="[bold cyan]Active Event Listeners[/]", box=box.ROUNDED)
+        table.add_column("Type", style="magenta")
+        table.add_column("ID", style="green")
+        table.add_column("Status", style="yellow")
+
+        for poll_id, info in data.get("polling", {}).items():
+            table.add_row("Polling", poll_id, info.get("status"))
+        
+        for watch_id, info in data.get("cli_watch", {}).items():
+            table.add_row("CLI Watch", watch_id, info.get("status"))
+
+        state.console.print(table)
+    except Exception as e:
+        rprint(f"[bold red]List Failed:[/] {e}")
+
+@sync_app.command("add")
+def sync_add(
+    tool_id: str = typer.Argument(..., help="The UUID of the tool to sync"),
+    direction: str = typer.Option("both", "--direction", help="Sync direction: 'both', 'to_mcp', 'from_mcp'"),
+    source_type: str = typer.Option("polling", "--type", help="Source type: 'polling' or 'cli_watch'"),
+    url: Optional[str] = typer.Option(None, "--url", help="URL for polling"),
+    command: Optional[str] = typer.Option(None, "--command", help="Command for CLI watch"),
+    interval: int = typer.Option(60, "--interval", help="Polling interval in seconds"),
+):
+    """
+    Add a new bidirectional sync or event listener to a tool.
+    """
+    try:
+        params = {}
+        if source_type == "polling":
+            if not url:
+                rprint("[bold red]Error:[/] --url is required for polling")
+                return
+            params = {"url": url, "interval_seconds": interval}
+        elif source_type == "cli_watch":
+            if not command:
+                rprint("[bold red]Error:[/] --command is required for CLI watch")
+                return
+            params = {"command": command}
+
+        payload = {
+            "tool_id": tool_id,
+            "direction": direction,
+            "source_type": source_type,
+            "params": params
+        }
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=True,
+        ) as progress:
+            progress.add_task(description="Configuring bidirectional sync...", total=None)
+            response = state.request("POST", "/events/sync", json=payload)
+        
+        if response.status_code == 200:
+            rprint(f"✅ [bold green]Sync successfully added![/] Direction: [bold]{direction}[/]")
+            rprint(f"Ontology mapping established for tool [dim]{tool_id}[/].")
+        else:
+            state.handle_auth_error(response)
+            rprint(f"[bold red]Failed to add sync:[/] {response.text}")
+    except Exception as e:
+        rprint(f"[bold red]Add Failed:[/] {e}")
+
+@sync_app.command("status")
+def sync_status():
+    """
+    Show live monitoring of recent events and semantic conflict resolutions.
+    """
+    from rich.live import Live
+    import time
+
+    def get_status_table():
+        try:
+            response = state.request("GET", "/events/recent")
+            if response.status_code != 200:
+                return Text(f"Error fetching events: {response.status_code}", style="bold red")
+            
+            events = response.json()
+            table = Table(title="[bold green]Live Event Stream[/]", box=box.MINIMAL_DOUBLE_HEAD)
+            table.add_column("Time", style="dim")
+            table.add_column("Tool", style="cyan")
+            table.add_column("Type", style="magenta")
+            table.add_column("Entity Key", style="yellow")
+            table.add_column("Conflict Res", style="green")
+
+            for event in events[:15]:  # Show last 15
+                table.add_row(
+                    event.get("timestamp", "").split("T")[-1][:8],
+                    event.get("tool_id", "")[:8],
+                    event.get("event_type", ""),
+                    event.get("entity_key", "N/A"),
+                    "[dim]semantic-match[/]"
+                )
+            return table
+        except Exception as e:
+            return Text(f"Error: {e}", style="bold red")
+
+    with Live(get_status_table(), refresh_per_second=2, vertical_overflow="visible") as live:
+        rprint("[bold yellow]Monitoring live events... Press Ctrl+C to stop.[/]")
+        try:
+            while True:
+                time.sleep(1)
+                live.update(get_status_table())
+        except KeyboardInterrupt:
+            rprint("\n[bold blue]Monitoring stopped.[/]")
 
 
 # --- Runtime Command (Existing functionality) ---

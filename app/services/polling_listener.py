@@ -36,6 +36,15 @@ class PollingListener:
             task.cancel()
         self._tasks.clear()
 
+    def get_active_polls(self) -> dict[str, Any]:
+        return {
+            poll_id: {
+                "poll_id": poll_id,
+                "status": "running" if not task.done() else "stopped",
+            }
+            for poll_id, task in self._tasks.items()
+        }
+
     async def _poll_loop(
         self,
         poll_id: str,
