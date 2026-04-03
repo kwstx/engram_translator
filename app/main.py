@@ -33,6 +33,7 @@ from app.api.v1 import (
     tasks,
     workflows,
     registry,
+    events,
 )
 from bridge.memory import router as memory_router
 from app.core.config import settings
@@ -40,6 +41,7 @@ from app.core.logging import configure_logging
 from app.db.session import init_db
 from app.services.task_worker import TaskWorker
 from app.services.workflow_scheduler import WorkflowScheduler
+from app.services.event_listener import EventListener
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -51,6 +53,7 @@ logger = structlog.get_logger(__name__)
 discovery_service = DiscoveryService()
 task_worker = TaskWorker()
 workflow_scheduler = WorkflowScheduler()
+event_listener = EventListener()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,6 +61,7 @@ async def lifespan(app: FastAPI):
     app.state.discovery_service = discovery_service
     app.state.task_worker = task_worker
     app.state.workflow_scheduler = workflow_scheduler
+    app.state.event_listener = event_listener
     
     # Initialize DB (create tables if they don't exist)
     await init_db()
@@ -66,6 +70,7 @@ async def lifespan(app: FastAPI):
     await discovery_service.start_periodic_discovery()
     await task_worker.start()
     await workflow_scheduler.start()
+    await event_listener.start()
     logger.info("Engram orchestration services started automatically via lifespan.")
     
     yield
@@ -74,6 +79,7 @@ async def lifespan(app: FastAPI):
     await discovery_service.stop_periodic_discovery()
     await task_worker.stop()
     await workflow_scheduler.stop()
+    await event_listener.stop()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -138,6 +144,6 @@ app.include_router(orchestration.router, prefix=settings.API_V1_STR, tags=["Orch
 app.include_router(tasks.router, prefix=settings.API_V1_STR + "/tasks", tags=["Tasks"])
 app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows"])
 app.include_router(registry.router, prefix=settings.API_V1_STR, tags=["Registry"])
+app.include_router(events.router, prefix=settings.API_V1_STR, tags=["Events"])
 app.include_router(memory_router, prefix=settings.API_V1_STR)
-
 

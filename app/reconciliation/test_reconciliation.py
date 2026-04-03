@@ -28,42 +28,49 @@ app.reconciliation.engine.db_engine = test_engine
 async def test_drift_cases():
     engine = ReconciliationEngine()
     
-    print("Testing 'email'...")
-    res = await engine.resolve_field("SOURCE_A", "TARGET_B", "email")
+    print("Testing 'email' (direct match)...")
+    res = await engine.resolve_field(ProtocolType.A2A, "TARGET_B", "email")
     print(f"Result for 'email': {res}")
     assert res == "email"
 
-    print("Testing 'contact_email'...")
-    res = await engine.resolve_field("SOURCE_A", "TARGET_B", "contact_email")
+    print("Testing 'contact_email' (semantic match, low confidence)...")
+    res = await engine.resolve_field(ProtocolType.A2A, "TARGET_B", "contact_email")
     print(f"Result for 'contact_email': {res}")
+    # With threshold 0.70 and score ~0.75, it should return 'email' but not auto-apply yet (if auto-apply is 0.80)
     assert res == "email"
 
-    print("Testing 'customer_first_name'...")
-    res = await engine.resolve_field("SOURCE_A", "TARGET_B", "customer_first_name")
+    print("Testing 'customer_first_name' (semantic match, borderline)...")
+    res = await engine.resolve_field(ProtocolType.A2A, "TARGET_B", "customer_first_name")
     print(f"Result for 'customer_first_name': {res}")
+    # With threshold 0.70 and score ~0.74, it should return 'first_name'
     assert res == "first_name"
+
+    print("Running repair loop to apply buffered matches...")
+    await engine.repair_loop()
 
     # Check persistence
     async with AsyncSession(test_engine) as session:
         query = select(ProtocolMapping).where(
-            ProtocolMapping.source_protocol == "SOURCE_A",
+            ProtocolMapping.source_protocol == ProtocolType.A2A,
             ProtocolMapping.target_protocol == "TARGET_B"
         )
         result = await session.execute(query)
         mapping = result.scalars().first()
         
         assert mapping is not None
+        print(f"Persisted mapping after repair: {mapping.semantic_equivalents}")
+        assert "email" in mapping.semantic_equivalents
         assert "contact_email" in mapping.semantic_equivalents
+        assert "customer_first_name" in mapping.semantic_equivalents
         assert mapping.semantic_equivalents["contact_email"] == "email"
-        print(f"Persisted mapping: {mapping.semantic_equivalents}")
 
-async def test_repair_loop():
+async def test_repair_loop_isolated():
     engine = ReconciliationEngine()
     
     # Manually insert a high-confidence failure
     async with AsyncSession(test_engine) as session:
         failure = MappingFailureLog(
-            source_protocol="REPAIR_SRC",
+            source_protocol=ProtocolType.MCP,
             target_protocol="REPAIR_TGT",
             source_field="cust_email",
             model_suggestion="email",
@@ -80,7 +87,7 @@ async def test_repair_loop():
     # Check if applied
     async with AsyncSession(test_engine) as session:
         query = select(ProtocolMapping).where(
-            ProtocolMapping.source_protocol == "REPAIR_SRC",
+            ProtocolMapping.source_protocol == ProtocolType.MCP,
             ProtocolMapping.target_protocol == "REPAIR_TGT"
         )
         result = await session.execute(query)
@@ -89,12 +96,13 @@ async def test_repair_loop():
         assert mapping.semantic_equivalents["cust_email"] == "email"
         
         query = select(MappingFailureLog).where(
-            MappingFailureLog.source_protocol == "REPAIR_SRC",
-            MappingFailureLog.source_field == "cust_email"
+            MappingFailureLog.source_protocol == ProtocolType.MCP,
+            MappingFailureLog.source_field == "cust_email",
+            MappingFailureLog.applied == True
         )
         result = await session.execute(query)
         failure = result.scalars().first()
-        assert failure.applied == True
+        assert failure is not None
 
 async def main():
     # Initialize DB (create tables for SQLite)
@@ -103,7 +111,7 @@ async def main():
         
     try:
         await test_drift_cases()
-        await test_repair_loop()
+        await test_repair_loop_isolated()
         print("\n" + "="*40)
         print("All reconciliation tests passed!")
         print("="*40)

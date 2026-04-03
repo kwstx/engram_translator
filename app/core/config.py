@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     REDIS_SOCKET_TIMEOUT_SECONDS: float = 0.2
     SEMANTIC_CACHE_TTL_SECONDS: int = 600
 
+    # Event stream (Redis Streams)
+    EVENT_STREAM_KEY: str = "engram:events"
+    EVENT_STREAM_GROUP: str = "engram-event-workers"
+    EVENT_STREAM_CONSUMER: str = "worker-1"
+    EVENT_STREAM_BLOCK_MS: int = 2000
+    EVENT_STREAM_BATCH: int = 25
+    EVENT_STREAM_MAXLEN: int = 10000
+    EVENT_POLL_INTERVAL_SECONDS: float = 10.0
+
     # ML mapping suggestions
     ML_ENABLED: bool = True
     ML_MODEL_PATH: str = "app/semantic/models/mapping_model.joblib"
@@ -120,6 +129,17 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     PERPLEXITY_API_KEY: Optional[str] = None
     SLACK_API_TOKEN: Optional[str] = None
+
+    # Tool routing
+    ROUTING_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    ROUTING_STATS_WINDOW_HOURS: int = 168
+    ROUTING_CACHE_TTL_SECONDS: int = 60
+    ROUTING_WEIGHT_SIMILARITY: float = 0.55
+    ROUTING_WEIGHT_SUCCESS: float = 0.2
+    ROUTING_WEIGHT_LATENCY: float = 0.15
+    ROUTING_WEIGHT_TOKEN_COST: float = 0.07
+    ROUTING_WEIGHT_CONTEXT_OVERHEAD: float = 0.03
+    ROUTING_WEIGHT_PREFERENCE: float = 0.1
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 

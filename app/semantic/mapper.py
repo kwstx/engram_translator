@@ -63,7 +63,9 @@ class SemanticMapper:
             "A2A": "http://agent.middleware.org/A2A#",
             "MCP": "http://agent.middleware.org/MCP#",
             "ACP": "http://agent.middleware.org/ACP#",
-            "BASE": "http://agent.middleware.org/protocols.owl#"
+            "CLI": "http://agent.middleware.org/CLI#",
+            "HTTP": "http://agent.middleware.org/HTTP#",
+            "BASE": "http://agent.middleware.org/protocols.owl#",
         }
 
         if source_protocol not in namespaces:
@@ -107,6 +109,77 @@ class SemanticMapper:
         result = f"Equivalents found but none in target protocols: {[str(e.iri) for e in equivalents]}"
         self._cache_set(cache_key, result)
         return result
+
+    def resolve_to_ontology_concept(self, concept: str, source_protocol: str) -> str:
+        """
+        Maps a protocol-specific concept to a canonical ontology concept name.
+        Falls back to the original concept when no ontology match is found.
+        """
+        if not self.ontology:
+            return concept
+
+        source_protocol = source_protocol.upper()
+        namespaces = {
+            "A2A": "http://agent.middleware.org/A2A#",
+            "MCP": "http://agent.middleware.org/MCP#",
+            "ACP": "http://agent.middleware.org/ACP#",
+            "CLI": "http://agent.middleware.org/CLI#",
+            "HTTP": "http://agent.middleware.org/HTTP#",
+            "BASE": "http://agent.middleware.org/protocols.owl#",
+        }
+
+        namespace = namespaces.get(source_protocol)
+        source_concept = None
+        if namespace:
+            source_concept = self.world.search_one(iri=f"{namespace}{concept}")
+
+        if not source_concept:
+            source_concept = self.world.search_one(name=concept)
+
+        if not source_concept:
+            return concept
+
+        if hasattr(source_concept, "equivalent_to"):
+            for eq in source_concept.equivalent_to:
+                if isinstance(eq, type):
+                    return getattr(eq, "name", concept) or concept
+
+        return getattr(source_concept, "name", concept) or concept
+
+    def resolve_from_ontology_concept(self, concept: str, target_protocol: str) -> str:
+        """
+        Maps a canonical ontology concept name into a target protocol's concept name.
+        Returns the original concept if no match is found.
+        """
+        if not self.ontology:
+            return concept
+
+        target_protocol = target_protocol.upper()
+        namespaces = {
+            "A2A": "http://agent.middleware.org/A2A#",
+            "MCP": "http://agent.middleware.org/MCP#",
+            "ACP": "http://agent.middleware.org/ACP#",
+            "CLI": "http://agent.middleware.org/CLI#",
+            "HTTP": "http://agent.middleware.org/HTTP#",
+            "BASE": "http://agent.middleware.org/protocols.owl#",
+        }
+
+        target_namespace = namespaces.get(target_protocol)
+        source_concept = self.world.search_one(name=concept)
+        if not source_concept:
+            # Try protocol-specific IRI as a fallback
+            if target_namespace:
+                source_concept = self.world.search_one(iri=f"{target_namespace}{concept}")
+            if not source_concept:
+                return concept
+
+        if hasattr(source_concept, "equivalent_to"):
+            for eq in source_concept.equivalent_to:
+                eq_iri = str(eq.iri)
+                if target_namespace and eq_iri.startswith(target_namespace):
+                    return eq_iri.replace(target_namespace, "")
+
+        return concept
 
     def DataSiloResolver(
         self, 

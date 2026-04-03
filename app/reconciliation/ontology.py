@@ -38,7 +38,7 @@ class OntologyResolver:
     def __init__(self):
         ensure_base_ontology()
         self.onto = get_ontology(str(BASE_OWL_PATH)).load()
-        # self.sync_reasoner()
+        self.sync_reasoner()
 
     def sync_reasoner(self):
         with self.onto:

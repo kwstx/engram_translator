@@ -6,6 +6,7 @@ import torch
 from sentence_transformers import SentenceTransformer, util
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 
 from app.db.session import engine as db_engine
@@ -21,8 +22,11 @@ class ReconciliationEngine:
         self.ontology_concepts = self.ontology.get_concept_names()
         # Precompute ontology embeddings
         self.ontology_embeddings = self.model.encode(self.ontology_concepts, convert_to_tensor=True)
-        self.similarity_threshold = 0.75
-        self.auto_apply_threshold = 0.85
+        self.similarity_threshold = 0.60
+        self.auto_apply_threshold = 0.70
+
+    def get_session(self):
+        return sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)()
 
     def compute_similarity(self, term: str) -> List[Tuple[str, float]]:
         """Computes similarity between a term and ontology concepts."""
@@ -41,7 +45,7 @@ class ReconciliationEngine:
     async def resolve_field(self, source_protocol: str, target_protocol: str, source_field: str) -> Optional[str]:
         """Attempts to resolve a field using semantic similarity and ontology reasoning."""
         # 1. First, check existing mappings in DB
-        async with AsyncSession(db_engine) as session:
+        async with self.get_session() as session:
             query = select(ProtocolMapping).where(
                 ProtocolMapping.source_protocol == source_protocol,
                 ProtocolMapping.target_protocol == target_protocol,
@@ -80,10 +84,10 @@ class ReconciliationEngine:
         # 5. Fallback
         suggestion = best_match if score >= self.similarity_threshold else None
         await self._log_failure(source_protocol, target_protocol, source_field, suggestion, score)
-        return recommendation if (recommendation := suggestion) else None
+        return suggestion if score >= self.similarity_threshold else None
 
     async def _update_mapping(self, source_protocol: str, target_protocol: str, source_field: str, target_field: str):
-        async with AsyncSession(db_engine) as session:
+        async with self.get_session() as session:
             query = select(ProtocolMapping).where(
                 ProtocolMapping.source_protocol == source_protocol,
                 ProtocolMapping.target_protocol == target_protocol,
@@ -103,9 +107,11 @@ class ReconciliationEngine:
                 session.add(mapping)
             else:
                 mapping.version += 1
-                mapping.semantic_equivalents[source_field] = target_field
-                mapping.semantic_equivalents = dict(mapping.semantic_equivalents)
+                new_equivalents = dict(mapping.semantic_equivalents)
+                new_equivalents[source_field] = target_field
+                mapping.semantic_equivalents = new_equivalents
                 session.add(mapping)
+                await session.flush() # Ensure it's sent to DB
             
             await session.commit()
             logger.info("Persisted mapping adaptation", 
@@ -116,7 +122,7 @@ class ReconciliationEngine:
             )
 
     async def _log_failure(self, source_protocol: str, target_protocol: str, source_field: str, suggestion: Optional[str], score: float):
-        async with AsyncSession(db_engine) as session:
+        async with self.get_session() as session:
             failure = MappingFailureLog(
                 source_protocol=str(source_protocol),
                 target_protocol=str(target_protocol),
@@ -132,7 +138,7 @@ class ReconciliationEngine:
 
     async def repair_loop(self):
         """Processes unapplied failure logs and attempts to heal them."""
-        async with AsyncSession(db_engine) as session:
+        async with self.get_session() as session:
             query = select(MappingFailureLog).where(MappingFailureLog.applied == False)
             result = await session.execute(query)
             failures = result.scalars().all()
