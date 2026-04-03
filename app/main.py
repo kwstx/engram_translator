@@ -35,6 +35,7 @@ from app.api.v1 import (
     registry,
     events,
     tracing,
+    catalog,
 )
 from bridge.memory import router as memory_router
 from app.core.config import settings
@@ -44,6 +45,7 @@ from app.services.task_worker import TaskWorker
 from app.services.workflow_scheduler import WorkflowScheduler
 from app.services.event_listener import EventListener
 from contextlib import asynccontextmanager
+import uuid
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.services.discovery import DiscoveryService
@@ -72,6 +74,37 @@ async def lifespan(app: FastAPI):
     await task_worker.start()
     await workflow_scheduler.start()
     await event_listener.start()
+    
+    # Seed the popular apps catalog
+    from app.services.catalog_service import CatalogService
+    from app.db.session import get_session
+    import os
+    async for db in get_session():
+        service = CatalogService(db)
+        seed_path = os.path.join(os.path.dirname(__file__), "catalog", "seed_data.yaml")
+        await service.seed_catalog_from_yaml(seed_path)
+        
+        # Pre-populate some popular tools for immediate discoverability
+        # We use a placeholder system agent ID
+        system_agent_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        # Ensure the system agent exists
+        from app.db.models import AgentRegistry
+        stmt = select(AgentRegistry).where(AgentRegistry.agent_id == system_agent_id)
+        result = await db.execute(stmt)
+        if not result.scalars().first():
+            db.add(AgentRegistry(
+                agent_id=system_agent_id,
+                endpoint_url="http://localhost:8000",
+                supported_protocols=["MCP", "CLI", "HTTP"]
+            ))
+            await db.commit()
+            
+        entries = await service.get_entries()
+        for entry in entries:
+            if not entry.is_cached:
+                await service.warm_up_registry(entry.slug, system_agent_id)
+        break # Just need one session
+    
     logger.info("Engram orchestration services started automatically via lifespan.")
     
     yield
@@ -147,5 +180,6 @@ app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", 
 app.include_router(registry.router, prefix=settings.API_V1_STR, tags=["Registry"])
 app.include_router(events.router, prefix=settings.API_V1_STR, tags=["Events"])
 app.include_router(tracing.router, prefix=settings.API_V1_STR, tags=["Tracing"])
+app.include_router(catalog.router, prefix=settings.API_V1_STR, tags=["Catalog"])
 app.include_router(memory_router, prefix=settings.API_V1_STR)
 

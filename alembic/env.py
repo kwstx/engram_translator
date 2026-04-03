@@ -13,6 +13,8 @@ from app.db.models import (
     ProtocolMapping,
     ProtocolVersionDelta,
     AgentRegistry,
+    ToolRegistry,
+    ToolExecutionMetadata,
     SemanticOntology,
     Task,
     AgentMessage,
@@ -23,6 +25,7 @@ from app.db.models import (
     Workflow,
     WorkflowSchedule,
 )
+from app.catalog.models import CatalogEntry, CatalogSubmission
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
