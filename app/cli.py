@@ -1208,11 +1208,7 @@ def run(
     """
     Start the Engram Protocol Bridge backend and TUI dashboard.
     """
-    from app.cli import start_runtime # We'll need to refactor this slightly or just import it
-    # For now, we'll try to use the legacy start_runtime logic
-    # but we need to avoid circular imports. 
-    # Since we are overwriting app/cli.py, we should include the runtime logic here.
-    
+    # Start the runtime using the built-in logic
     _start_legacy_runtime(host, port, "debug" if debug else None)
 
 def _start_legacy_runtime(host: str, port: int, initial_screen: Optional[str]):
