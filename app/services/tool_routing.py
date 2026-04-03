@@ -24,6 +24,52 @@ logger = structlog.get_logger(__name__)
 
 _GRAPH_CACHE: Dict[str, Tuple[float, nx.DiGraph]] = {}
 
+def context_aware_prune_tools(
+    tools: List[ToolRegistry],
+    task_intent: str,
+    conversation_history: List[Dict[str, str]] = None
+) -> List[ToolRegistry]:
+    """
+    Pre-routing step: Embeds task intent + conversation history to dynamically 
+    filter tools or compress schemas based on semantic relevance.
+    """
+    if not task_intent:
+        return tools
+        
+    # Combine intent and recent history for context
+    history_text = " ".join([m.get("content", "") for m in (conversation_history or [])[-3:]])
+    context_text = f"{task_intent} {history_text}".strip()
+    context_vec = _embed_text(context_text)
+    
+    pruned: List[ToolRegistry] = []
+    logger.info("Starting context-aware pruning", context_length=len(context_text), original_tool_count=len(tools))
+    
+    for tool in tools:
+        tool_text = _tool_base_text(tool)
+        tool_vec = _embed_text(tool_text)
+        similarity = _cosine_similarity(context_vec, tool_vec)
+        
+        # Semantic threshold to filter out irrelevant tools entirely
+        if similarity < 0.2:
+            logger.debug("Pruning tool based on semantic mismatch", tool=tool.name, similarity=similarity)
+            continue
+            
+        # Compress schema based on history (e.g. drop irrelevant fields)
+        # We apply heuristic compression preserving semantic meaning
+        # In a real setup, a local LLM would restructure the schema.
+        if hasattr(tool, 'input_schema') and isinstance(tool.input_schema, dict):
+            props = tool.input_schema.get("properties", {})
+            # Mock compression: if property mentions "metadata" but task doesn't, drop it
+            if "metadata" in props and "metadata" not in context_text.lower():
+                props.pop("metadata")
+                tool.input_schema["properties"] = props
+                
+        pruned.append(tool)
+        
+    logger.info("Completed context-aware pruning", pruned_tool_count=len(pruned))
+    return pruned
+
+
 
 CLI_BACKEND = "CLI"
 MCP_BACKEND = "MCP"

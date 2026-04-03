@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     ROUTING_WEIGHT_CONTEXT_OVERHEAD: float = 0.03
     ROUTING_WEIGHT_PREFERENCE: float = 0.1
 
+    # Local LLM (Ollama)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2"
+
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

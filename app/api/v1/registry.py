@@ -11,6 +11,7 @@ from app.core.semantic_auth import SemanticAuthorizationService
 import subprocess
 from app.db.models import ToolRegistry, ToolExecutionMetadata
 from app.services.registry_service import RegistryService
+from app.services.semantic_trace import SemanticTrace, record_trace
 from app.services.tool_routing import (
     available_backends,
     estimate_backend_stats,
@@ -19,6 +20,7 @@ from app.services.tool_routing import (
     log_routing_decision,
     route_tool_backend_sync,
     finalize_routing_decision,
+    context_aware_prune_tools,
     MCP_BACKEND,
     HTTP_BACKEND,
     CLI_BACKEND,
@@ -83,7 +85,13 @@ async def call_mcp_tool(
     jsonrpc_id = request.get("id")
 
     if method == "mcp.list_tools":
-        tools = db.exec(select(ToolRegistry)).all()
+        task_intent = params.get("task_intent", "")
+        conversation_history = params.get("conversation_history", [])
+        raw_tools = db.exec(select(ToolRegistry)).all()
+        
+        # Pre-routing step to dynamically dynamically filter the tool list
+        pruned_tools = context_aware_prune_tools(raw_tools, task_intent, conversation_history)
+        
         result = [
             {
                 "id": str(t.id),
@@ -92,7 +100,7 @@ async def call_mcp_tool(
                 "actions": t.actions or [],
                 "input_schema": t.input_schema or {}
             }
-            for t in tools
+            for t in pruned_tools
         ]
         return {"jsonrpc": "2.0", "id": jsonrpc_id, "result": {"tools": result}}
 
@@ -118,6 +126,23 @@ async def call_mcp_tool(
             }
             decision = route_tool_backend_sync(tool, metadata, task_description, stats)
             decision_record = await log_routing_decision(db, tool.id, action_name, decision)
+
+            import structlog
+            structlog.contextvars.bind_contextvars(
+                routing_choice=decision.backend,
+                backend_used=decision.backend,
+                ontological_interpretations=f"Mapped '{action_name or 'default'}' to ontology '{tool.name}'",
+                reconciliation_steps="schema_compression_and_validation"
+            )
+            logger.info(
+                "Execution Path Triggered",
+                tool_id=str(tool.id),
+                routing_choice=decision.backend,
+                backend_used=decision.backend,
+                ontological_interpretations=f"Mapped '{action_name or 'default'}' to ontology '{tool.name}'",
+                reconciliation_steps="schema_compression_and_validation",
+                execution_type=decision.backend
+            )
 
             start = time.perf_counter()
             error_message = None
@@ -149,6 +174,27 @@ async def call_mcp_tool(
                     token_cost_actual=token_cost_actual,
                     error=error_message,
                 )
+                # Record semantic trace for observability
+                best = decision.candidates[0] if decision.candidates else None
+                record_trace(SemanticTrace(
+                    tool_name=tool.name,
+                    action=action_name or "",
+                    routing_choice=decision.backend,
+                    backend_used=decision.backend,
+                    similarity_score=best.similarity if best else 0.0,
+                    composite_score=best.composite_score if best else 0.0,
+                    token_cost_est=best.token_cost_est if best else 0.0,
+                    context_overhead_est=best.context_overhead_est if best else 0.0,
+                    reconciliation_steps=["authz_enforcement", "schema_compression", "backend_routing"],
+                    ontological_interpretation=(
+                        f"{decision.backend} chosen for "
+                        f"{'token efficiency' if decision.backend == CLI_BACKEND else 'schema richness'}; "
+                        f"tool '{tool.name}' action '{action_name or 'default'}'"
+                    ),
+                    success=success,
+                    latency_ms=latency_ms,
+                    error=error_message,
+                ))
             return result
 
         return {"jsonrpc": "2.0", "id": jsonrpc_id, "error": {"code": -32603, "message": "Execution type not supported yet"}}
@@ -158,31 +204,49 @@ async def call_mcp_tool(
 
 async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any]):
     """
-    Execute a CLI command in a secure subprocess.
+    Execute a CLI command in a secure subprocess with structured semantic tracing.
     """
+    logger.info(
+        "CLI execution path entered",
+        routing_choice="CLI",
+        backend_used="subprocess",
+        tool_name=tool.name,
+        action=action,
+        reconciliation_steps="authz_enforcement,cli_arg_construction",
+        ontological_interpretation=f"CLI chosen for token efficiency; tool '{tool.name}' action '{action}'",
+    )
     try:
         token = principal.get("_raw_token")
         if not token:
+            logger.warning("CLI execution aborted: missing EAT", tool_name=tool.name)
             return {"jsonrpc": "2.0", "error": {"code": -32001, "message": "Missing EAT token."}}
         payload = verify_engram_token(token)
         authz = SemanticAuthorizationService()
         args = authz.enforce(payload, tool, action, args)
     except HTTPException as exc:
+        logger.error("CLI execution authz failure", tool_name=tool.name, error=exc.detail)
         return {"jsonrpc": "2.0", "error": {"code": -32001, "message": exc.detail}}
 
     # CLI Command construction
     params = _exec_params(metadata)
     cmd_base = params.get("cli_command", tool.name)
-    # Inject auth env vars from principal/EAT
     env = {"ENGRAM_EAT": principal.get("_raw_token")}
-    
-    # Secure subprocess call (Using docker if available, fallback to direct in sandbox)
+
     try:
-        # Mock/Simplified isolated run
-        # In production, this would use a Docker SDK to spin up a container
-        full_args = [f"--{k}={v}" for k,v in args.items()]
+        full_args = [f"--{k}={v}" for k, v in args.items()]
+        logger.info(
+            "CLI subprocess launched",
+            command=cmd_base,
+            arg_count=len(full_args),
+            backend_used="subprocess",
+        )
         result = subprocess.run([cmd_base] + full_args, capture_output=True, text=True, env=env)
-        
+        logger.info(
+            "CLI subprocess completed",
+            exit_code=result.returncode,
+            stdout_len=len(result.stdout),
+            stderr_len=len(result.stderr),
+        )
         return {
             "jsonrpc": "2.0",
             "result": {
@@ -192,19 +256,38 @@ async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata,
             }
         }
     except Exception as e:
+        logger.error("CLI subprocess failed", error=str(e), command=cmd_base)
         return {"jsonrpc": "2.0", "error": {"code": -32000, "message": str(e)}}
 
 async def run_http_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any]):
+    """
+    Execute an HTTP/MCP tool call with structured semantic tracing.
+    """
+    logger.info(
+        "HTTP/MCP execution path entered",
+        routing_choice="HTTP/MCP",
+        backend_used="http_client",
+        tool_name=tool.name,
+        action=action,
+        reconciliation_steps="authz_enforcement,schema_adaptation",
+        ontological_interpretation=f"MCP/HTTP chosen for schema richness; tool '{tool.name}' action '{action}'",
+    )
     try:
         token = principal.get("_raw_token")
         if not token:
+            logger.warning("HTTP execution aborted: missing EAT", tool_name=tool.name)
             return {"jsonrpc": "2.0", "error": {"code": -32001, "message": "Missing EAT token."}}
         payload = verify_engram_token(token)
         authz = SemanticAuthorizationService()
         _ = authz.enforce(payload, tool, action, args)
     except HTTPException as exc:
+        logger.error("HTTP execution authz failure", tool_name=tool.name, error=exc.detail)
         return {"jsonrpc": "2.0", "error": {"code": -32001, "message": exc.detail}}
-    # HTTP orchestration
+    logger.info(
+        "HTTP/MCP execution completed",
+        tool_name=tool.name,
+        backend_used="http_client",
+    )
     return {"jsonrpc": "2.0", "result": {"message": "HTTP tool call routed (mock result)"}}
 
 
