@@ -1,19 +1,5 @@
 import os
 import sys
-
-# Force UTF-8 encoding for standard output and error to prevent UnicodeEncodeError
-# on Windows environments when rich tries to print emojis or box drawing characters.
-if getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-if getattr(sys.stderr, 'encoding', '').lower() != 'utf-8':
-    try:
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-
 import json
 import yaml
 import asyncio
@@ -1069,7 +1055,7 @@ app.add_typer(trace_app, name="trace")
 def trace_list(
     limit: int = typer.Option(20, help="Number of traces to show"),
     tool: Optional[str] = typer.Option(None, help="Filter by tool name"),
-    export_json: bool = typer.Option(False, "--export", help="Export as JSON for easy piping"),
+    export_json: bool = typer.Option(False, "--export", "json", help="Export as JSON for easy piping"),
 ):
     """
     Renders a filterable Rich table of recent semantic execution traces.
@@ -1119,10 +1105,11 @@ def trace_list(
     except Exception as e:
         rprint(f"[bold red]Failed to list traces:[/] {e}")
 
+@trace_app.command(name=".")
 @trace_app.command(name="detail")
 def trace_detail(
     trace_id: str = typer.Argument(".", help="Trace ID to inspect (use '.' for the very latest)"),
-    export_json: bool = typer.Option(False, "--export", help="Export full trace as JSON"),
+    export_json: bool = typer.Option(False, "--export", "json", help="Export full trace as JSON"),
 ):
     """
     Detailed inspection including semantic path, routing reasoning, and healing steps.
@@ -1222,7 +1209,11 @@ def run(
     """
     Start the Engram Protocol Bridge backend and TUI dashboard.
     """
-    # Start the runtime using the built-in logic
+    from app.cli import start_runtime # We'll need to refactor this slightly or just import it
+    # For now, we'll try to use the legacy start_runtime logic
+    # but we need to avoid circular imports. 
+    # Since we are overwriting app/cli.py, we should include the runtime logic here.
+    
     _start_legacy_runtime(host, port, "debug" if debug else None)
 
 def _start_legacy_runtime(host: str, port: int, initial_screen: Optional[str]):
@@ -1241,39 +1232,28 @@ def _start_legacy_runtime(host: str, port: int, initial_screen: Optional[str]):
         border_style="orange1"
     ))
 
-    if initial_screen == "debug":
-        # Start API in background thread
-        def run_api():
-            try:
-                import uvicorn
-                from app.main import app as fastapi_app
-                uvicorn.run(fastapi_app, host=host, port=port, log_level="warning", access_log=False)
-            except Exception as e:
-                rprint(f"\n❌ [bold red]Backend Failed:[/] {e}")
-                os._exit(1)
-        api_thread = threading.Thread(target=run_api, daemon=True)
-        api_thread.start()
-        time.sleep(1.5)
-        rprint(" ✅ [bold green]Backend Ready.[/]")
-        
-        # Start TUI
+    # Start API in background thread
+    def run_api():
         try:
-            from tui.app import EngramTUI
-            tui = EngramTUI(base_url=f"http://{host}:{port}/api/v1")
-            tui.initial_screen = initial_screen
-            tui.run()
-        except Exception as e:
-            rprint(f"❌ [bold red]TUI Error:[/] {e}")
-    else:
-        # CLI Mode: Run API in foreground
-        rprint("[dim]Use --debug to launch the live TUI dashboard.[/dim]")
-        try:
-            import uvicorn
-            from app.main import app as fastapi_app
-            uvicorn.run(fastapi_app, host=host, port=port, log_level="info", access_log=True)
+            uvicorn.run(fastapi_app, host=host, port=port, log_level="warning", access_log=False)
         except Exception as e:
             rprint(f"\n❌ [bold red]Backend Failed:[/] {e}")
             os._exit(1)
+    
+    api_thread = threading.Thread(target=run_api, daemon=True)
+    api_thread.start()
+    
+    time.sleep(1.5)
+    rprint(" ✅ [bold green]Backend Ready.[/]")
+    
+    # Start TUI
+    try:
+        tui = EngramTUI(base_url=f"http://{host}:{port}/api/v1")
+        if initial_screen:
+            tui.initial_screen = initial_screen
+        tui.run()
+    except Exception as e:
+        rprint(f"❌ [bold red]TUI Error:[/] {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
