@@ -43,7 +43,7 @@ def _sanitize_db_url(url: str) -> tuple[str, bool]:
 # Use SQLModel engines for compatibility
 db_url, ssl_required = _sanitize_db_url(settings.DATABASE_URL)
 connect_args = {"ssl": True} if ssl_required else {}
-engine = create_async_engine(db_url, echo=True, future=True, connect_args=connect_args)
+engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args)
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async_session = sessionmaker(
@@ -57,38 +57,45 @@ logger = logging.getLogger(__name__)
 async def init_db():
     """
     Initializes the database connection and runs migrations.
-    In production, this replaces manual 'create_all' with Alembic versioning.
+    - PostgreSQL (production/Docker): Uses Alembic migrations.
+    - SQLite (local dev): Uses SQLModel.metadata.create_all directly,
+      since Alembic migrations use PostgreSQL-specific types (JSONB, ARRAY).
     """
-    retries = 15
-    delay = 4
+    is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+    retries = 2 if is_sqlite else 15
+    delay = 1 if is_sqlite else 4
+
     for i in range(retries):
         try:
-            # Check connection
             async with engine.begin() as conn:
                 await conn.execute(text("SELECT 1"))
-                
-                # Check for advisory lock to prevent multiple workers from migrating at once
-                if engine.dialect.name == "postgresql":
+
+                if is_sqlite:
+                    # SQLite: skip Alembic (migrations use pg-only types).
+                    # Import all models so SQLModel.metadata knows every table.
+                    import app.db.models  # noqa: F401
+                    try:
+                        import app.catalog.models  # noqa: F401
+                    except Exception:
+                        pass
+                    await conn.run_sync(SQLModel.metadata.create_all)
+                    logger.info("SQLite database tables created via SQLModel.metadata.create_all.")
+                else:
+                    # PostgreSQL: full Alembic migration path
                     await conn.execute(text("SELECT pg_advisory_xact_lock(42)"))
-                
-                logger.info("Database connection established. Running migrations...")
-                
-                # Run Alembic migrations programmatically
-                # Note: This runs in the same thread, which is fine for startup
-                from alembic.config import Config
-                from alembic import command
-                
-                def run_upgrade():
-                    alembic_cfg = Config("alembic.ini")
-                    # Enforce the same DATABASE_URL from settings
-                    alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
-                    command.upgrade(alembic_cfg, "head")
+                    logger.info("Database connection established. Running migrations...")
 
-                # Alembic's 'upgrade' command is synchronous, but our env.py handles the async loop
-                # So we just call it.
-                await asyncio.to_thread(run_upgrade)
+                    from alembic.config import Config
+                    from alembic import command
 
-            logger.info("Database initialized and migrated successfully.")
+                    def run_upgrade():
+                        alembic_cfg = Config("alembic.ini")
+                        alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+                        command.upgrade(alembic_cfg, "head")
+
+                    await asyncio.to_thread(run_upgrade)
+
+            logger.info("Database initialized successfully.")
             return
         except Exception as e:
             if i < retries - 1:

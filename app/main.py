@@ -48,6 +48,7 @@ from app.services.workflow_scheduler import WorkflowScheduler
 from app.services.event_listener import EventListener
 from contextlib import asynccontextmanager
 import uuid
+from sqlmodel import select
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.services.discovery import DiscoveryService

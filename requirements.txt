@@ -40,3 +40,4 @@ docker>=7.0.0
 mcp>=0.1.0
 keyring>=24.3.0
 sentence-transformers>=2.5.0
+aiosqlite>=0.20.0

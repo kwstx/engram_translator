@@ -154,7 +154,15 @@ class Settings(BaseSettings):
                 f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
                 f"@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
             )
-        elif self.DATABASE_URL.startswith("postgres://"):
+            
+        # Smart fallback for local execution (Windows/macOS without Docker)
+        if not os.path.exists("/.dockerenv") and not os.environ.get("KUBERNETES_PORT"):
+            if "db:5432" in str(self.DATABASE_URL) or self.POSTGRES_SERVER == "db":
+                self.DATABASE_URL = "sqlite+aiosqlite:///./engram.db"
+            if self.REDIS_HOST == "redis":
+                self.REDIS_ENABLED = False
+
+        if self.DATABASE_URL.startswith("postgres://"):
             self.DATABASE_URL = "postgresql+asyncpg://" + self.DATABASE_URL[len("postgres://") :]
         elif (
             self.DATABASE_URL.startswith("postgresql://")
