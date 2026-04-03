@@ -18,14 +18,13 @@ import jwt
 from pydantic import BaseModel, Field, HttpUrl
 from rich import box
 from rich.json import JSON
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 from rich import print as rprint
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
-from rich.group import Group
 
 # Constants
 APP_NAME = "engram"
