@@ -1,226 +1,86 @@
-<p align="center">
-  <img src="assets/logo.png" alt="Engram Logo" width="400">
-</p>
+# Semantic Bridge
 
-<h1 align="center">Engram</h1>
+The adaptive semantic interoperability layer for AI agents. Connect **anything** — any API, any system, any protocol — with one lightweight layer that auto-generates tools, self-heals schema drift, intelligently routes between MCP and CLI, and scales seamlessly from single agents to multi-agent swarms.
 
-<p align="center">
-  <strong>CONNECT ANY AGENT. ANY TOOL. ANY API.</strong><br>
-  One identity layer. One routing engine. One semantic bridge.
-</p>
+It creates reliable, self-improving tool integrations: register once (or point at any endpoint), and your agents get tools that adapt over time, fix mismatches on the fly, choose the best execution backend (MCP for structure or CLI for speed), and collaborate across protocols without glue code or maintenance hell.
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/Works_with-MCP-blue?style=for-the-badge" alt="Works with MCP">
-  <img src="https://img.shields.io/badge/Works_with-A2A-green?style=for-the-badge" alt="Works with A2A">
-  <img src="https://img.shields.io/badge/Works_with-ACP-orange?style=for-the-badge" alt="Works with ACP">
-</p>
+**Universal onboarding** • **Self-healing schemas with OWL + ML** • **Hybrid MCP + CLI execution** • **Performance-weighted routing** • **Unified EAT identity** • **Bidirectional sync** • **Cross-protocol federation (A2A/ACP)** • **Self-evolving tools**
 
-The lightweight interoperability layer that sits between AI agents, tools, and APIs. It translates protocols (A2A ↔ MCP ↔ ACP), auto-fixes schema mismatches with OWL ontologies + self-healing ML, routes tasks through a performance-weighted graph, and gives every participant a single token (EAT). No more custom glue code — register once, talk to anything.
+Works with any agent framework. No lock-in. Runs lightweight on your laptop, VPS, or in production.
 
-<p align="center">
-  <a href="https://useengram.com">Website</a> &#183;
-  <a href="https://docs.useengram.com">Docs</a>
-</p>
+## What It Does
 
----
+Semantic Bridge solves brittle agent tool integrations that break in production. It sits between agents and tools, translating and routing across protocols while keeping integrations healthy over time:
+
+- Translates between MCP, CLI, A2A, and ACP with multi-hop handoffs when needed.
+- Auto-generates tool schemas and keeps them aligned as APIs drift.
+- Chooses the best execution backend (structured MCP or faster CLI) per task.
+- Maintains a unified EAT identity and permissions model across protocols.
+- Syncs and normalizes events for reliable cross-system collaboration.
 
 ## Quick Install
 
 ```bash
-git clone https://github.com/kwstx/engram_translator.git && cd engram_translator
-docker compose up --build -d
+curl -fsSL https://get.semanticbridge.dev/install | bash
 ```
 
-Open `http://localhost:8000/docs` for the Swagger UI. The full stack (PostgreSQL, Redis, Prometheus, Grafana) starts automatically.
+Works on Linux, macOS, and WSL2. The installer sets up Python dependencies, the `sb` CLI, and core services.
 
-**Windows (no Docker):**
-```powershell
-pip install -r requirements.txt
-.\engram.bat
-```
+After installation:
 
-**Linux / macOS (no Docker):**
 ```bash
-chmod +x setup.sh && ./setup.sh
-python app/cli.py
+source ~/.bashrc    # or source ~/.zshrc
+sb                  # start the CLI
 ```
-
----
-
-## What It Does
-
-| Capability | How |
-| :--- | :--- |
-| **Protocol translation** | Full bidirectional A2A ↔ MCP ↔ ACP conversion. Multi-hop routing via Dijkstra when no direct edge exists. |
-| **Self-healing semantics** | OWL ontology → PyDatalog rules → TF-IDF/LogReg ML fallback. Auto-applies fixes at ≥ 85% confidence and retrains itself. |
-| **Performance-aware routing** | NetworkX graph with dynamic weights from agent latency and success rate. Dead agents dropped by heartbeat. |
-| **Unified identity** | One JWT-based Engram Access Token (EAT) per participant. Scoped to protocols and tools. Issued on `/signup`. |
-| **Natural-language delegation** | Free-text commands decomposed into atomic tasks, mapped to agent capabilities, and routed — no protocol knowledge needed. |
-| **Cryptographic proofs** | Every translation hop produces a SHA-256 proof. Multi-hop chains return an aggregate `v1:agg:<hash>`. |
-| **Production observability** | Prometheus metrics, Grafana dashboards, real-time TUI debug console with structured event streaming. |
-
----
 
 ## Getting Started
 
 ```bash
-# 1. Register an agent
-curl -X POST http://localhost:8000/api/v1/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "my-agent",
-    "supported_protocols": ["MCP"],
-    "capabilities": ["shell", "web"],
-    "semantic_tags": ["automation"],
-    "endpoint_url": "http://my-agent:9000"
-  }'
-
-# 2. Translate a message between protocols
-curl -X POST http://localhost:8000/api/v1/beta/translate \
-  -H "Authorization: Bearer <your-eat-token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source_protocol": "A2A",
-    "target_protocol": "MCP",
-    "payload": { "intent": "dispatch" }
-  }'
-
-# 3. Delegate a task in plain English
-curl -X POST http://localhost:8000/api/v1/delegate \
-  -H "Authorization: Bearer <your-eat-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"command": "Summarize the latest release and send it to Slack"}'
+sb                  # Interactive CLI mode
+sb register         # Onboard any API or CLI tool
+sb tools list       # View all registered tools
+sb route test "send an email"   # Test intelligent routing
+sb doctor           # Check system health
+sb update           # Update to latest version
 ```
 
----
+## Core Features
 
-## How It Works
+1. Universal onboarding that accepts any OpenAPI, GraphQL, URL+auth, partial docs, or CLI manifest and auto-generates dual MCP + CLI representations.
+2. Core self-healing engine using OWL ontologies + ML that detects and fixes schema drift, custom fields, and output mismatches in real time.
+3. Unified EAT token with semantic permissions that works across MCP and CLI.
+4. Basic performance-weighted routing that chooses the best backend (CLI for token efficiency or MCP for structured calls) based on task and history.
+5. Bidirectional sync and event layer for any connected system with semantic normalization.
+6. Context-aware pruning and rich semantic traces for observability.
+7. Efficient support for popular apps while keeping custom and internal tools as the hero.
+8. Self-evolving tools: ML continuously improves descriptions, defaults, and recovery strategies from real executions.
+9. Full cross-protocol federation with seamless translation and handoff between MCP, CLI, A2A, and ACP.
+10. Predictive optimizer and adaptive wrappers for legacy/non-API systems.
 
-```mermaid
-flowchart TB
-    subgraph Sources
-        AG1["Agent A (A2A)"]
-        AG2["Agent B (MCP)"]
-        NL["Human (Natural Language)"]
-    end
-    subgraph Engram Core
-        AUTH["EAT Auth Layer"]
-        IR["Intent Resolver"]
-        PG["Protocol Graph + Dijkstra"]
-        SM["Semantic Mapper (OWL + ML)"]
-        TQ["Task Queue"]
-    end
-    subgraph Targets
-        AG3["Agent C (ACP)"]
-        TOOL["External Tools / APIs"]
-    end
-    AG1 --> AUTH
-    AG2 --> AUTH
-    NL --> AUTH
-    AUTH --> IR
-    IR --> PG
-    PG --> SM
-    SM --> TQ
-    TQ --> AG3
-    TQ --> TOOL
-```
+## CLI Command Reference
 
----
+The `sb` CLI is your primary interface — clean, scriptable, and agent-friendly with Rich formatting and JSON output mode.
 
-## Works With Anything
+Add `--json` for machine-readable output perfect for agents. Run `sb <command> --help` for detailed flags.
 
-Any agent, tool, or API that speaks A2A, MCP, or ACP — register once and Engram handles the rest. No adapters, no glue code.
+## Why It’s Different
 
-```bash
-# MCP agent? One call.
-curl -X POST http://localhost:8000/api/v1/register \
-  -d '{"agent_id": "my-agent", "supported_protocols": ["MCP"], "endpoint_url": "http://my-agent:9000"}'
-
-# A2A agent? Same call.
-curl -X POST http://localhost:8000/api/v1/register \
-  -d '{"agent_id": "other-agent", "supported_protocols": ["A2A"], "endpoint_url": "http://other-agent:8080"}'
-```
-
-If it has an endpoint and speaks a supported protocol, it works.
-
----
-
-## Python SDK
-
-```python
-from engram_sdk import EngramSDK
-
-sdk = EngramSDK(
-    base_url="http://localhost:8000/api/v1",
-    eat="<YOUR_EAT>",
-)
-
-result = sdk.translate(
-    {"intent": "schedule_meeting", "participants": ["alice", "bob"]},
-    source_protocol="a2a",
-    target_protocol="mcp",
-)
-
-print(result.payload)  # Translated MCP-format payload
-```
-
----
-
-## TUI Dashboard
-
-Run `python app/cli.py debug` for a live terminal dashboard:
-
-| Command | Action |
-| :--- | :--- |
-| `/status` | Health of bridge, memory silos, workers |
-| `/agents` | Connected agents and compatibility scores |
-| `/clear` | Clear event logs |
-| **Any text** | Auto-routed to the Delegation Engine |
-
-Key bindings: `Q` quit · `C` clear · `R` refresh metrics
-
----
-
-## Configuration
-
-All config via environment variables (`.env` file):
-
-| Variable | Description |
-| :--- | :--- |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_ENABLED` | `true` to enable semantic cache |
-| `AUTH_JWT_SECRET` | Secret key for signing EATs |
-| `AUTH_ISSUER` | Expected JWT issuer |
-| `AUTH_AUDIENCE` | Expected JWT audience |
-| `MIROFISH_BASE_URL` | MiroFish instance URL (default: `localhost:5001`) |
-
----
-
-## Performance
-
-JMeter-verified on local Docker stack:
-
-| Metric | Result |
-| :--- | :--- |
-| **Throughput** | ≥ 150 req/sec |
-| **p50 Latency** | ≤ 120 ms |
-| **p99 Latency** | ≤ 600 ms |
-
----
+Most tool platforms give you connectors that break on custom fields or API changes. Semantic Bridge gives agents tools that heal themselves, intelligently pick between MCP and CLI, evolve over time, and work across protocols — so your agents stay reliable in production without constant maintenance.
 
 ## Documentation
 
-| Resource | Link |
-| :--- | :--- |
-| Full docs | [docs.useengram.com](https://docs.useengram.com) |
-| API reference (Swagger) | `http://localhost:8000/docs` |
-| Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Deployment | [DEPLOYMENT.md](DEPLOYMENT.md) |
-| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+Full documentation lives at docs.semanticbridge.dev:
 
----
+- Quickstart — Install to first connected tool in under 5 minutes
+- CLI Reference — All commands and flags
+- Universal Onboarding — How to connect any API or CLI tool
+- Self-Healing Engine — OWL ontologies + ML explained
+- MCP + CLI Hybrid Routing — When each backend is chosen
+- Protocol Federation — A2A and ACP handoff
+- Configuration — EAT tokens, routing weights, ontology
+- Architecture — Phases, components, and design decisions
+- Contributing — Development setup and guidelines
 
-## License
+Built for developers who want agents that actually work on real-world systems — not just popular SaaS.
 
-[MIT](LICENSE)
+Star the repo if you’re building reliable agent tooling.
