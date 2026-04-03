@@ -8,6 +8,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 
 import typer
 import httpx
@@ -23,6 +24,7 @@ from rich.tree import Tree
 from rich import print as rprint
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
+from rich.group import Group
 
 # Constants
 APP_NAME = "engram"
@@ -897,6 +899,158 @@ def sync_status():
                 live.update(get_status_table())
         except KeyboardInterrupt:
             rprint("\n[bold blue]Monitoring stopped.[/]")
+
+
+
+# --- Trace Subgroup (Observability) ---
+trace_app = typer.Typer(help="Observability and semantic execution tracing")
+app.add_typer(trace_app, name="trace")
+
+@trace_app.command("list")
+def trace_list(
+    limit: int = typer.Option(20, help="Number of traces to show"),
+    tool: Optional[str] = typer.Option(None, help="Filter by tool name"),
+    export_json: bool = typer.Option(False, "--export", "json", help="Export as JSON for easy piping"),
+):
+    """
+    Renders a filterable Rich table of recent semantic execution traces.
+    """
+    ctx = state
+    try:
+        traces = ctx.request("GET", f"/api/v1/traces?limit={limit}")
+        
+        # Client-side filtering
+        if tool:
+            traces = [t for t in traces if tool.lower() in t.get("tool_name", "").lower()]
+
+        if export_json:
+            print(json.dumps(traces, indent=2))
+            return
+
+        table = Table(
+            title="[bold magenta]Recent Semantic Traces[/]", 
+            box=box.ROUNDED,
+            caption="Use [bold]engram trace .[/] to view the latest execution detail"
+        )
+        table.add_column("Timestamp", style="dim")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Tool", style="magenta")
+        table.add_column("Backend", style="yellow")
+        table.add_column("Success", style="bold")
+        table.add_column("Tokens", style="green", justify="right")
+
+        for trace in traces:
+            success_color = "green" if trace.get("success") else "red"
+            success_text = f"[{success_color}]PASS[/]" if trace.get("success") else f"[{success_color}]FAIL[/]"
+            
+            ts_float = trace.get("timestamp", 0)
+            ts = datetime.fromtimestamp(ts_float).strftime("%Y-%m-%d %H:%M:%S")
+            
+            table.add_row(
+                ts,
+                trace.get("trace_id", "N/A")[:8],
+                trace.get("tool_name", "N/A"),
+                trace.get("routing_choice", "N/A"),
+                success_text,
+                f"{trace.get('token_cost_est', 0):.0f}"
+            )
+        
+        ctx.console.print(table)
+        rprint("[dim italic]Run [bold]engram trace .[/] for natural-language analysis of routing and healing.[/]")
+    except Exception as e:
+        rprint(f"[bold red]Failed to list traces:[/] {e}")
+
+@trace_app.command(name=".")
+@trace_app.command(name="detail")
+def trace_detail(
+    trace_id: str = typer.Argument(".", help="Trace ID to inspect (use '.' for the very latest)"),
+    export_json: bool = typer.Option(False, "--export", "json", help="Export full trace as JSON"),
+):
+    """
+    Detailed inspection including semantic path, routing reasoning, and healing steps.
+    """
+    ctx = state
+    try:
+        # Resolve "." to the last trace ID if needed
+        actual_id = trace_id
+        if trace_id == ".":
+            recent = ctx.request("GET", "/api/v1/traces?limit=1")
+            if not recent:
+                rprint("[bold red]No traces found.[/]")
+                return
+            actual_id = recent[0]["trace_id"]
+
+        # Fetch detailed trace
+        trace = ctx.request("GET", f"/api/v1/traces/{actual_id}")
+        
+        # Fetch natural-language summary (which uses LLM internally on the backend)
+        try:
+            summary_resp = ctx.request("POST", "/api/v1/traces/query", json={"trace_limit": 5})
+            summary = summary_resp.get("summary", "Summary not generated.")
+        except Exception:
+            summary = "[dim italic]Natural-language reasoning summary currently unavailable.[/]"
+
+        if export_json:
+            print(json.dumps(trace, indent=2))
+            return
+
+        # 1. Summary Panel (Natural Language)
+        summary_panel = Panel(
+            Text(summary, justify="left", style="italic white"),
+            title="[bold yellow]🤖 Routing & Healing Summary[/]",
+            border_style="yellow",
+            padding=(1, 2)
+        )
+        
+        # 2. Trace Details (Semantic Trace Tree)
+        tree = Tree(f"🔍 [bold cyan]Semantic Trace:[/] {actual_id}")
+        
+        # Path Info
+        success_status = "[bold green]PASS[/]" if trace.get("success") else "[bold red]FAIL[/]"
+        path_node = tree.add(f"🛤️ [bold magenta]Execution Path[/] [{success_status}]")
+        path_node.add(f"Tool Selection: [bold]{trace.get('tool_name', 'N/A')}[/]")
+        path_node.add(f"Routing Choice: [bold yellow]{trace.get('routing_choice', 'N/A')}[/]")
+        path_node.add(f"Actual Backend: [dim]{trace.get('backend_used', 'N/A')}[/]")
+        path_node.add(f"Latency: [white]{trace.get('latency_ms', 0.0):.1f}ms[/]")
+        
+        # Scoring reasoning
+        scores = path_node.add("📊 [bold green]Performance Weights[/]")
+        scores.add(f"Semantic Similarity: [dim]{trace.get('similarity_score', 0.0):.3f}[/]")
+        scores.add(f"Composite Score: [dim]{trace.get('composite_score', 0.0):.3f}[/]")
+        scores.add(f"Token Efficiency: [white]{trace.get('token_cost_est', 0.0):.1f} tokens[/]")
+        
+        # Reconciliation Steps (Healing)
+        heal_node = tree.add("🛠️ [bold orange1]Self-Healing Steps[/]")
+        steps = trace.get("reconciliation_steps", [])
+        if not steps:
+            heal_node.add("[dim italic]No drift detected; no healing required.[/]")
+        else:
+            for step in steps:
+                heal_node.add(f"[italic]{step}[/]")
+        
+        # Ontological Interpretation
+        ont_node = tree.add("🧠 [bold blue]Ontological Alignment[/]")
+        ont_node.add(f"Context: [italic]{trace.get('ontological_interpretation', 'N/A')}[/]")
+        
+        mappings = trace.get("field_mappings", {})
+        if mappings:
+            mapping_sub = ont_node.add("Synthesized Field Mappings")
+            for k, v in mappings.items():
+                mapping_sub.add(f"[cyan]{k}[/] → [green]{v}[/]")
+
+        # Assemble Group for Output
+        group = Group(
+            summary_panel,
+            Panel(tree, title="✨ Full Semantic Inspection", border_style="cyan"),
+        )
+        
+        ctx.console.print(group)
+        
+        if trace.get("error"):
+            rprint(Panel(trace["error"], title="❌ Error Stack", border_style="red"))
+
+    except Exception as e:
+        rprint(f"[bold red]Failed to fetch trace details:[/] {e}")
 
 
 # --- Runtime Command (Existing functionality) ---
