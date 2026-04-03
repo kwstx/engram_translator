@@ -6,6 +6,7 @@
 # Set DIR to the script's directory
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export PYTHONPATH="$DIR"
+export PYTHONIOENCODING="utf-8"
 
 VENV_DIR="$DIR/venv"
 PY_EXE="$VENV_DIR/bin/python3"

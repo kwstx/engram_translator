@@ -1,5 +1,19 @@
 import os
 import sys
+
+# Force UTF-8 encoding for standard output and error to prevent UnicodeEncodeError
+# on Windows environments when rich tries to print emojis or box drawing characters.
+if getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if getattr(sys.stderr, 'encoding', '').lower() != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import json
 import yaml
 import asyncio
