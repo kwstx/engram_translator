@@ -671,6 +671,108 @@ def heal_now():
         rprint(f"[bold red]Healing aborted:[/] {e}")
 
 
+# --- Route Subgroup ---
+route_app = typer.Typer(help="Test and visualize performance-weighted routing decisions")
+app.add_typer(route_app, name="route")
+
+@route_app.command("test")
+def route_test(
+    description: str = typer.Argument(..., help="Natural language description of the task"),
+    force_mcp: bool = typer.Option(False, "--force-mcp", help="Force routing to MCP backend"),
+    force_cli: bool = typer.Option(False, "--force-cli", help="Force routing to CLI backend"),
+):
+    """
+    Simulate routing for a task description and display choice reasoning.
+    """
+    ctx = state
+    force_backend = None
+    if force_mcp: force_backend = "MCP"
+    if force_cli: force_backend = "CLI"
+    
+    try:
+        payload = {"task_description": description, "force_backend": force_backend}
+        result = ctx.request("POST", "/api/v1/routing/test", json=payload)
+        
+        # Build the Rich Panel
+        tool_name = result.get("tool_name", "N/A")
+        backend = result.get("selected_backend", "N/A")
+        confidence = result.get("confidence_score", 0.0)
+        latency = result.get("predicted_latency_ms", 0.0)
+        cost = result.get("predicted_cost_tokens", 0.0)
+        reasoning = result.get("reasoning", "")
+        
+        # Main Panel
+        panel_content = (
+            f"[bold cyan]Chosen Tool:[/] {tool_name}\n"
+            f"[bold green]Backend:[/] {backend}\n"
+            f"[bold yellow]Confidence:[/] {confidence:.1%}\n"
+            f"[bold magenta]Predicted Latency:[/] {latency:.0f}ms\n"
+            f"[bold white]Estimated Cost:[/] {cost:.1f} tokens\n\n"
+            f"[dim italic]Reasoning: {reasoning}[/]"
+        )
+        
+        rprint(Panel(panel_content, title="🚀 Optimal Routing Decision", border_style="bold cyan", expand=False))
+        
+        # Comparison Table
+        table = Table(title="📊 Alternative Backends Comparison", box=rich.box.SIMPLE)
+        table.add_column("Backend", style="cyan")
+        table.add_column("Score", style="yellow")
+        table.add_column("Sim.", style="dim")
+        table.add_column("Latency", style="magenta")
+        table.add_column("Success", style="green")
+        
+        for cand in result.get("candidates", []):
+            is_selected = "[bold green]✓[/] " if cand["backend"] == backend else "  "
+            table.add_row(
+                f"{is_selected}{cand['backend']}",
+                f"{cand['composite_score']:.2f}",
+                f"{cand['similarity']:.2f}",
+                f"{cand['latency_ms']:.0f}ms",
+                f"{cand['success_rate']:.1%}"
+            )
+        
+        ctx.console.print(table)
+
+    except Exception as e:
+        rprint(f"[bold red]Routing Test Failed:[/] {e}")
+
+@route_app.command("list")
+def route_list():
+    """
+    Display a sorted table of tools with historical performance statistics.
+    """
+    ctx = state
+    try:
+        results = ctx.request("GET", "/api/v1/routing/list")
+        
+        table = Table(title="📈 Global Tool Performance Stats", box=rich.box.DOUBLE_EDGE, border_style="blue")
+        table.add_column("Tool Name", style="cyan", no_wrap=True)
+        table.add_column("Backend", style="magenta")
+        table.add_column("Avg Latency", style="yellow", justify="right")
+        table.add_column("Success Rate", style="green", justify="right")
+        table.add_column("Avg Cost", style="white", justify="right")
+        table.add_column("Samples", style="dim", justify="right")
+        
+        if not results:
+             table.add_row("[dim]N/A[/]", "[dim]No decisions logged[/]", "-", "-", "-", "0")
+        else:
+            for row in results:
+                table.add_row(
+                    row["tool_name"],
+                    row["backend"],
+                    f"{row['avg_latency_ms']:.0f}ms",
+                    f"{row['success_rate']:.1%}",
+                    f"{row['avg_cost_tokens']:.1f} tok",
+                    str(row["samples"])
+                )
+            
+        ctx.console.print(table)
+        rprint("[dim italic]Decisions are weighted by these historically captured metrics.[/]")
+
+    except Exception as e:
+        rprint(f"[bold red]List Failed:[/] {e}")
+
+
 # --- Runtime Command (Existing functionality) ---
 
 @app.command()
