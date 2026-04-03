@@ -88,7 +88,7 @@ class DiscoveryService:
                     agents = result.scalars().all()
 
                     if agents:
-                        logger.info(
+                        logger.debug(
                             "DiscoveryService: Pinging registered agents.",
                             agent_count=len(agents),
                         )
@@ -102,7 +102,7 @@ class DiscoveryService:
                             await asyncio.gather(*tasks, return_exceptions=True)
 
                         await session.commit()
-                        logger.info(
+                        logger.debug(
                             "DiscoveryService: Agent health statuses committed to registry."
                         )
 
@@ -110,7 +110,7 @@ class DiscoveryService:
                         # This enables real-time weighted Dijkstra routing in the Orchestrator.
                         try:
                             await self.update_agent_metrics(session)
-                            logger.info(
+                            logger.debug(
                                 "DiscoveryService: Reliability metrics updated for agents."
                             )
                         except Exception as e:
@@ -207,7 +207,7 @@ class DiscoveryService:
         from app.db.models import AgentMessage, AgentMessageStatus
         from sqlalchemy import func
         
-        logger.info("DiscoveryService: Updating agent performance metrics from logs.")
+        logger.debug("DiscoveryService: Updating agent performance metrics from logs.")
         
         # 1. Fetch all agents
         query = select(AgentRegistry)

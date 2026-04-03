@@ -171,6 +171,10 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 async def root():
     return {"message": "Agent Translator Middleware is Online", "version": "0.1.0"}
 
+@app.get("/health", tags=["Health"])
+async def health():
+    return {"status": "healthy"}
+
 # Include API v1 routers
 app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Auth"])
 app.include_router(endpoints.router, prefix=settings.API_V1_STR)
