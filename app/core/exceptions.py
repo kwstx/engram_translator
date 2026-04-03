@@ -44,3 +44,7 @@ class ExpiredTokenError(PermanentError):
     """Raised when a session or provider token has expired and requires user action."""
     pass
 
+class ValidationError(PermanentError):
+    """Raised when input validation fails."""
+    pass
+
