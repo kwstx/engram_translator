@@ -38,6 +38,7 @@ from app.api.v1 import (
     catalog,
     reconciliation,
     routing,
+    evolution,
 )
 from bridge.memory import router as memory_router
 from app.core.config import settings
@@ -200,5 +201,6 @@ app.include_router(tracing.router, prefix=settings.API_V1_STR, tags=["Tracing"])
 app.include_router(catalog.router, prefix=settings.API_V1_STR, tags=["Catalog"])
 app.include_router(reconciliation.router, prefix=settings.API_V1_STR + "/reconciliation", tags=["Reconciliation"])
 app.include_router(routing.router, prefix=settings.API_V1_STR + "/routing", tags=["Routing"])
+app.include_router(evolution.router, prefix=settings.API_V1_STR + "/evolution", tags=["Evolution"])
 app.include_router(memory_router, prefix=settings.API_V1_STR)
 

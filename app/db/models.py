@@ -181,6 +181,13 @@ class ToolExecutionMetadata(SQLModel, table=True):
         sa_type=JSON
     )
 
+    # Recovery strategies (automated or suggested repairs)
+    # e.g., [{"error_pattern": "timeout", "action": "retry_with_high_latency_backend"}]
+    recovery_strategies: List[Dict[str, Any]] = Field(
+        default=[],
+        sa_type=JSON
+    )
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -479,3 +486,55 @@ class TokenAuditLog(SQLModel, table=True):
         default={},
         sa_type=JSON
     )
+
+
+class EvolutionFeedbackType(str, enum.Enum):
+    RATING = "RATING"
+    CORRECTION = "CORRECTION"
+    SUGGESTION = "SUGGESTION"
+
+
+class ToolFeedback(SQLModel, table=True):
+    __tablename__ = "tool_feedback"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tool_id: uuid.UUID = Field(foreign_key="tool_registry.id", index=True, nullable=False)
+    user_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id", index=True)
+    eat_token: Optional[str] = Field(index=True) # Token hash or direct EAT
+    feedback_type: EvolutionFeedbackType = Field(
+        default=EvolutionFeedbackType.RATING,
+        sa_column=Column(Enum(EvolutionFeedbackType), index=True, nullable=False),
+    )
+    score: Optional[float] = Field(default=None) # e.g., 0.0 to 1.0 or -1 to 1
+    comment: Optional[str] = Field(default=None)
+    metadata_json: Dict[str, Any] = Field(
+        default={},
+        sa_type=JSON
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ToolEvolution(SQLModel, table=True):
+    __tablename__ = "tool_evolution"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tool_id: uuid.UUID = Field(foreign_key="tool_registry.id", index=True, nullable=False)
+    previous_version: str = Field(nullable=False)
+    new_version: str = Field(nullable=False)
+    
+    # What was changed (semantic diff)
+    change_type: str = Field(index=True) # e.g., "description_refinement", "params_optimization"
+    diff_payload: Dict[str, Any] = Field(
+        default={},
+        sa_type=JSON
+    )
+    
+    # RL/ML Signals used for this evolution
+    evolution_signals: Dict[str, Any] = Field(
+        default={},
+        sa_type=JSON
+    )
+    
+    confidence_score: float = Field(default=1.0)
+    applied_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_active: bool = Field(default=True)
