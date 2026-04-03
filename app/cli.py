@@ -1270,7 +1270,7 @@ def _start_legacy_runtime(host: str, port: int, initial_screen: Optional[str]):
         try:
             import uvicorn
             from app.main import app as fastapi_app
-            uvicorn.run(fastapi_app, host=host, port=port, log_level="info", access_log=True)
+            uvicorn.run(fastapi_app, host=host, port=port, log_level="warning", access_log=False)
         except Exception as e:
             rprint(f"\n❌ [bold red]Backend Failed:[/] {e}")
             os._exit(1)
