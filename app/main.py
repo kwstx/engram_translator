@@ -81,34 +81,36 @@ async def lifespan(app: FastAPI):
     await event_listener.start()
     
     # Seed the popular apps catalog
-    from app.services.catalog_service import CatalogService
-    from app.db.session import get_session
-    import os
-    async for db in get_session():
-        service = CatalogService(db)
-        seed_path = os.path.join(os.path.dirname(__file__), "catalog", "seed_data.yaml")
-        await service.seed_catalog_from_yaml(seed_path)
-        
-        # Pre-populate some popular tools for immediate discoverability
-        # We use a placeholder system agent ID
-        system_agent_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
-        # Ensure the system agent exists
-        from app.db.models import AgentRegistry
-        stmt = select(AgentRegistry).where(AgentRegistry.agent_id == system_agent_id)
-        result = await db.execute(stmt)
-        if not result.scalars().first():
-            db.add(AgentRegistry(
-                agent_id=system_agent_id,
-                endpoint_url="http://localhost:8000",
-                supported_protocols=["MCP", "CLI", "HTTP"]
-            ))
-            await db.commit()
+    try:
+        from app.services.catalog_service import CatalogService
+        from app.db.session import get_session
+        import os
+        async for db in get_session():
+            service = CatalogService(db)
+            seed_path = os.path.join(os.path.dirname(__file__), "catalog", "seed_data.yaml")
+            if os.path.exists(seed_path):
+                await service.seed_catalog_from_yaml(seed_path)
             
-        entries = await service.get_entries()
-        for entry in entries:
-            if not entry.is_cached:
-                await service.warm_up_registry(entry.slug, system_agent_id)
-        break # Just need one session
+            # Pre-populate some popular tools for immediate discoverability
+            system_agent_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+            from app.db.models import AgentRegistry
+            stmt = select(AgentRegistry).where(AgentRegistry.agent_id == system_agent_id)
+            result = await db.execute(stmt)
+            if not result.scalars().first():
+                db.add(AgentRegistry(
+                    agent_id=system_agent_id,
+                    endpoint_url="http://localhost:8000",
+                    supported_protocols=["MCP", "CLI", "HTTP"]
+                ))
+                await db.commit()
+                
+            entries = await service.get_entries()
+            for entry in entries:
+                if not entry.is_cached:
+                    await service.warm_up_registry(entry.slug, system_agent_id)
+            break # Just need one session
+    except Exception as e:
+        logger.error("Failed to seed catalog during startup", error=str(e))
     
     logger.info("Engram orchestration services started automatically via lifespan.")
     from rich import print as rprint
@@ -139,7 +141,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

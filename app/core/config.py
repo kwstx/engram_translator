@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
-from typing import Optional, Any
+from typing import Optional, Any, List
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     HTTPS_ONLY: bool = False  # Set to True in production .env
+    CORS_ORIGINS: List[str] = ["*"]
     SANDBOX_ENABLED: bool = True
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: Optional[str] = None

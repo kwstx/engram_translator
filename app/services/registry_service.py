@@ -89,7 +89,7 @@ class RegistryService:
             actions=[{"name": "query", "description": "Generic GraphQL query execution"}]
         )
         self.db.add(tool)
-        self.db.flush()
+        await self.db.flush()
 
         execution_metadata = ToolExecutionMetadata(
             tool_id=tool.id,
@@ -98,7 +98,7 @@ class RegistryService:
             auth_config=auth_details or {}
         )
         self.db.add(execution_metadata)
-        self.db.commit()
+        await self.db.commit()
         return tool
 
     async def ingest_url_with_auth(self, url: str, agent_id: uuid.UUID, auth: Dict[str, Any]) -> ToolRegistry:
@@ -110,7 +110,7 @@ class RegistryService:
             actions=[{"name": "call", "description": "Call the specific URL"}]
         )
         self.db.add(tool)
-        self.db.flush()
+        await self.db.flush()
 
         execution_metadata = ToolExecutionMetadata(
             tool_id=tool.id,
@@ -119,7 +119,7 @@ class RegistryService:
             auth_config=auth
         )
         self.db.add(execution_metadata)
-        self.db.commit()
+        await self.db.commit()
         return tool
 
     async def ingest_cli_help(self, command: str, agent_id: uuid.UUID) -> ToolRegistry:
@@ -185,7 +185,7 @@ class RegistryService:
             actions=extracted["actions"]
         )
         self.db.add(tool)
-        self.db.flush()
+        await self.db.flush()
 
         execution_metadata = ToolExecutionMetadata(
             tool_id=tool.id,
@@ -193,7 +193,7 @@ class RegistryService:
             exec_params={"extracted_from": "docs", "raw_content_preview": docs_text[:200]},
         )
         self.db.add(execution_metadata)
-        self.db.commit()
+        await self.db.commit()
         return tool
 
     def _extract_openapi_base_url(self, spec: Dict[str, Any]) -> Optional[str]:

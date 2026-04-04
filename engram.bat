@@ -21,13 +21,13 @@ set PY_EXE="%~dp0venv\Scripts\python.exe"
 
 REM 2. Dependency Check (Fast Import Test)
 echo [INFO] Checking dependencies...
-%PY_EXE% -c "import keyring, typer, rich, httpx, jwt, pydantic, yaml, sentence_transformers, semver" >nul 2>&1
+%PY_EXE% -c "import keyring, typer, rich, httpx, jwt, pydantic, yaml" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Missing or broken dependencies. Synchronizing environment...
     %PY_EXE% -m pip install --upgrade pip >nul 2>&1
     %PY_EXE% -m pip install -r "%~dp0requirements.txt"
     REM Double-check imports before failing, as pip may return 1 for minor warnings
-    %PY_EXE% -c "import keyring, typer, rich, httpx, jwt, pydantic, yaml, sentence_transformers, semver" >nul 2>&1
+    %PY_EXE% -c "import keyring, typer, rich, httpx, jwt, pydantic, yaml" >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Environment synchronization failed. Check your internet connection or requirements.txt.
         exit /b 1

@@ -71,6 +71,10 @@ async def init_db():
                 await conn.execute(text("SELECT 1"))
 
                 if is_sqlite:
+                    # Optimized production settings for SQLite
+                    await conn.execute(text("PRAGMA journal_mode=WAL"))
+                    await conn.execute(text("PRAGMA synchronous=NORMAL"))
+                    
                     # SQLite: skip Alembic (migrations use pg-only types).
                     # Import all models so SQLModel.metadata knows every table.
                     import app.db.models  # noqa: F401
@@ -79,7 +83,7 @@ async def init_db():
                     except Exception:
                         pass
                     await conn.run_sync(SQLModel.metadata.create_all)
-                    logger.info("SQLite database tables created via SQLModel.metadata.create_all.")
+                    logger.info("SQLite database tables initialized in WAL mode via SQLModel.metadata.create_all.")
                 else:
                     # PostgreSQL: full Alembic migration path
                     await conn.execute(text("SELECT pg_advisory_xact_lock(42)"))

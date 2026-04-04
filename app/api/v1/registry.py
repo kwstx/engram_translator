@@ -3,6 +3,7 @@ import time
 import json
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select
 import structlog
 from app.db.session import get_session
@@ -76,7 +77,32 @@ async def ingest_docs(
 
 from sqlalchemy.orm import selectinload
 
-@router.get("/tools")
+# --- Response Models ---
+
+class ToolExecutionMetadataRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    execution_type: str
+    exec_params: Dict[str, Any]
+    cli_wrapper: Optional[str] = None
+    docker_image: Optional[str] = None
+    docker_config: Dict[str, Any] = {}
+    auth_config: Dict[str, Any] = {}
+
+class ToolRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    agent_id: uuid.UUID
+    name: str
+    description: str
+    version: Optional[str] = None
+    tags: List[str] = []
+    actions: List[Dict[str, Any]] = []
+    input_schema: Dict[str, Any] = {}
+    output_schema: Dict[str, Any] = {}
+    execution_metadata: Optional[ToolExecutionMetadataRead] = None
+
+@router.get("/tools", response_model=List[ToolRead])
 async def list_tools(db: Session = Depends(get_session)):
     """
     List all registered tools including their execution backend metadata.

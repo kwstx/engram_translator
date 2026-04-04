@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 # Force UTF-8 encoding for standard output and error to prevent UnicodeEncodeError
 # on Windows environments when rich tries to print emojis or box drawing characters.
@@ -580,6 +581,12 @@ def tool_list(
 
         except Exception as e:
             rprint(f"[bold red]Discovery Error:[/] {e}")
+            if "Connection Error" in str(e):
+                rprint("\n[bold yellow]💡 Suggestion:[/] It looks like the Engram Bridge server is not running.")
+                rprint("Try starting it in a new terminal with: [bold cyan]uvicorn app.main:app[/]\n")
+            elif "500" in str(e):
+                rprint("\n[bold yellow]💡 Suggestion:[/] The server encountered an internal error.")
+                rprint("Check the server logs for details. If you're running locally, make sure your [bold].env[/] file exists and is correctly configured.\n")
 
 
 @tool_app.command("search")
@@ -1608,11 +1615,12 @@ def _start_interactive_cli(host: str, port: int):
             _print_repl_help()
             continue
 
-        # Delegate to the Typer CLI by re‑invoking it as a subprocess
-        # but pointed at the already‑running backend.
+        # Delegate to the Typer CLI using subprocess which handles Windows quoting correctly.
         parts = cmd.split()
-        full_cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}" {" ".join(parts)}'
-        os.system(full_cmd)
+        try:
+            subprocess.run([sys.executable, os.path.abspath(__file__)] + parts)
+        except Exception as e:
+            rprint(f"[bold red]Execution Error:[/] {e}")
         print()  # breathing room after command output
 
 
