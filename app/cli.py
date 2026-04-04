@@ -564,8 +564,9 @@ def tool_list(
                 color = "green" if sr >= 0.9 else "yellow" if sr >= 0.7 else "red"
                 success_fmt = f"[{color}]{sr:.1%}[/]"
                 
-                processed_name = t["name"].replace("—", "-")
-                processed_desc = t["description"].replace("—", "-")
+                # Sanitize name and description for cross-terminal compatibility (replace Unicode dashes)
+                processed_name = t["name"].replace("\u2014", "-").replace("\u2013", "-")
+                processed_desc = t["description"].replace("\u2014", "-").replace("\u2013", "-")
                 
                 table.add_row(
                     hero_icon,

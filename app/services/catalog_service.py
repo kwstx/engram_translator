@@ -50,7 +50,20 @@ class CatalogService:
                         source=CatalogSource.SEED
                     )
                     self.db.add(entry)
-                    logger.info("Seeded catalog entry", slug=slug)
+                    logger.info("Seeded new catalog entry", slug=slug)
+                else:
+                    # Update existing entry with new seed data (to catch description fixes)
+                    existing.display_name = entry_data["display_name"]
+                    existing.description = entry_data.get("description", "")
+                    existing.category = entry_data.get("category", "general")
+                    existing.tags = entry_data.get("tags", [])
+                    existing.openapi_url = entry_data.get("openapi_url")
+                    existing.auth_hint = entry_data.get("auth_hint", {})
+                    existing.mcp_definition = entry_data.get("mcp_definition", {})
+                    existing.cli_command = entry_data.get("cli_command")
+                    existing.cli_wrapper_script = entry_data.get("cli_wrapper_script")
+                    self.db.add(existing)
+                    logger.info("Updated existing catalog entry from seed", slug=slug)
             
             await self.db.commit()
         except Exception as e:
