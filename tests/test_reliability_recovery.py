@@ -119,27 +119,3 @@ async def test_invalid_request_schema():
         assert result["engram_code"] == "BAD_TOOL_REQUEST"
         assert mock_handoff.call_count == 1
 
-@pytest.mark.asyncio
-async def test_network_failure_multi_hop():
-    """
-    Simulate a network failure during a multi-hop handoff.
-    """
-    _circuit_breaker["MIROFISH"] = 0
-    
-    with patch("app.messaging.orchestrator.Orchestrator.handoff_async") as mock_handoff:
-        mock_handoff.side_effect = [
-            MagicMock(translated_message={
-                "status": "error",
-                "error_type": "NetworkError",
-                "detail": "Connection reset"
-            }),
-            MagicMock(translated_message={
-                "status": "success",
-                "payload": "Fish found"
-            })
-        ]
-        
-        result = await routeTo("MIROFISH", {"find": "tuna"}, correlation_id="test_network_id")
-        
-        assert result["status"] == "success"
-        assert mock_handoff.call_count == 2

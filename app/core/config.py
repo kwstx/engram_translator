@@ -90,11 +90,6 @@ class Settings(BaseSettings):
     WORKFLOW_SCHEDULER_POLL_SECONDS: float = 5.0
     WORKFLOW_SCHEDULER_BATCH_SIZE: int = 20
 
-    # MiroFish Bridge
-    MIROFISH_BASE_URL: str = "http://localhost:5001"
-    MIROFISH_DEFAULT_NUM_AGENTS: int = 1000
-    MIROFISH_DEFAULT_SWARM_ID: str = "default"
-
     # Trading Templates
     TRADING_TEMPLATES_ENABLED: bool = True
     BINANCE_API_KEY: Optional[str] = None

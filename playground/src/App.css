@@ -267,23 +267,7 @@
   display: grid;
 }
 
-.bridge-panel {
-  gap: 16px;
-}
 
-.bridge-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.bridge-grid .control {
-  grid-column: span 3;
-}
-
-.bridge-grid .control.wide {
-  grid-column: span 6;
-}
 
 .toggle {
   display: inline-flex;
@@ -331,27 +315,6 @@
   background: #fff;
 }
 
-.bridge-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.bridge-status {
-  font-size: 0.85rem;
-  color: #4b4b4b;
-}
-
-.bridge-error {
-  color: #9c1a0b;
-}
-
-.bridge-footnote {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #6a6a6a;
-}
 
 .trading-templates-grid {
   display: grid;
@@ -432,17 +395,6 @@
     align-items: flex-start;
   }
 
-  .bridge-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .bridge-grid .control {
-    grid-column: span 3;
-  }
-
-  .bridge-grid .control.wide {
-    grid-column: span 6;
-  }
 }
 
 @media (max-width: 720px) {
@@ -458,11 +410,4 @@
     flex-wrap: wrap;
   }
 
-  .bridge-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .bridge-grid .control {
-    grid-column: span 4;
-  }
 }

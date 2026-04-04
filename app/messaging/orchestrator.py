@@ -283,7 +283,7 @@ class Orchestrator:
                 if "metadata" in source_message: new_payload["metadata"] = source_message["metadata"]
                 resolved_target = target_protocol
                 if not resolved_target or resolved_target == "AUTO":
-                    resolved_target = "MIROFISH" if primary.intent == "predict" else "MCP"
+                    resolved_target = "MCP"
                 return await self.handoff(new_payload, "NL", resolved_target, eat)
 
         return await self.handoff(source_message, source_protocol, target_protocol, eat)
