@@ -788,6 +788,64 @@ def register_manual_tool():
         rprint(f"[dim]Parameters ({len(parameters)}): {', '.join(p['name'] for p in parameters)}[/]\n")
     else:
         rprint("[dim]Parameters: None[/]\n")
+    # Submission (Step 7)
+    target_agent = _get_or_create_agent_id(state)
+    
+    # Payload matches ManualToolCreate + agent_id embedded
+    payload = {
+        "name": name,
+        "description": description,
+        "base_url": base_url,
+        "endpoint_path": path,
+        "method": method,
+        "parameters": parameters,
+        "agent_id": target_agent
+    }
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}"),
+        transient=True,
+    ) as progress:
+        progress.add_task(description="[cyan]Registering tool with backend...", total=None)
+        try:
+            result = state.request("POST", "/api/v1/registry/manual", json=payload)
+            
+            # Show Registration Summary
+            rprint("\n")
+            
+            summary_table = Table.grid(padding=(0, 2))
+            summary_table.add_column(style="bold magenta")
+            summary_table.add_column()
+            
+            summary_table.add_row("Tool ID", str(result.get("id", "N/A")))
+            summary_table.add_row("Endpoint", f"[dim]{method}[/] [green]{base_url}{path}[/]")
+            summary_table.add_row("Parameters", f"{len(parameters)} defined")
+            summary_table.add_row("Status", "[bold green]LIVE[/]")
+            summary_table.add_row("Backend", "HTTP (Synthetic OpenAPI)")
+            
+            summary_content = Group(
+                Text.from_markup(f"The tool [bold cyan]{name}[/] has been successfully registered and is now live."),
+                Text(""),
+                summary_table,
+                Text(""),
+                Text.from_markup(f"[dim]This tool is now discoverable by agents and can be executed via the CLI.[/]"),
+                Text(""),
+                Text.from_markup(f"[bold yellow]Test Command:[/] [bold]engram run --tool {name} --inspect[/]")
+            )
+            
+            rprint(Panel(
+                summary_content,
+                title="[bold green][*] Registration Summary[/]",
+                border_style="green",
+                padding=(1, 2)
+            ))
+            
+        except Exception as e:
+            rprint(f"\n[bold red]Registration Failed[/]")
+            rprint(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
 
 
 # --- Heal Subgroup ---
