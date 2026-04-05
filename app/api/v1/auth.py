@@ -148,238 +148,209 @@ async def login_page(request: Request):
     """
     Serves a beautiful, interactive login/signup page for the Engram CLI.
     """
-    html_content = """
+    html_content = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Engram - Identity Portal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <title>ENGRAM :: Identity Terminal</title>
     <style>
         :root {
-            --bg-dark: #0a0b10;
-            --primary: #5865F2;
-            --primary-glow: rgba(88, 101, 242, 0.4);
-            --accent: #00D1FF;
-            --text-main: #f0f1f5;
-            --text-dim: #9ca3af;
-            --card-bg: rgba(255, 255, 255, 0.03);
-            --card-border: rgba(255, 255, 255, 0.08);
-            --glass-blur: 16px;
+            --bg: #050607;
+            --bg-panel: #07090a;
+            --grid: rgba(0, 255, 156, 0.08);
+            --scan: rgba(0, 0, 0, 0.35);
+            --text: #c6f6d5;
+            --text-dim: #7aa88e;
+            --accent: #00ff9c;
+            --accent-soft: rgba(0, 255, 156, 0.12);
+            --border: rgba(0, 255, 156, 0.3);
+            --error: #f87171;
         }
 
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
+            font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", "SFMono-Regular", ui-monospace, monospace;
+            letter-spacing: 0.02em;
         }
 
         body {
-            background: var(--bg-dark);
-            color: var(--text-main);
+            background:
+                repeating-linear-gradient(
+                    to bottom,
+                    var(--scan),
+                    var(--scan) 1px,
+                    transparent 3px,
+                    transparent 5px
+                ),
+                radial-gradient(circle at 20% 20%, rgba(0, 255, 156, 0.08), transparent 55%),
+                var(--bg);
+            color: var(--text);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
-            position: relative;
+            padding: 32px;
         }
 
-        /* Animated Background */
-        .bg-glow {
-            position: absolute;
-            width: 600px;
-            height: 600px;
-            background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
-            border-radius: 50%;
-            filter: blur(80px);
-            z-index: -1;
-            animation: float 20s infinite alternate ease-in-out;
-        }
-
-        .bg-glow-2 {
-            position: absolute;
-            width: 400px;
-            height: 400px;
-            background: radial-gradient(circle, rgba(0, 209, 255, 0.2) 0%, transparent 70%);
-            border-radius: 50%;
-            filter: blur(60px);
-            z-index: -1;
-            top: 20%;
-            right: 15%;
-            animation: float 15s infinite alternate-reverse ease-in-out;
-        }
-
-        @keyframes float {
-            0% { transform: translate(-10%, -10%) scale(1); }
-            100% { transform: translate(10%, 10%) scale(1.1); }
-        }
-
-        .portal-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(var(--glass-blur));
-            border: 1px solid var(--card-border);
-            border-radius: 24px;
-            padding: 48px;
+        .terminal {
             width: 100%;
-            max-width: 440px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            max-width: 720px;
+            border: 1px solid var(--border);
+            background: var(--bg-panel);
+            box-shadow: 0 0 0 1px rgba(0, 255, 156, 0.12), 0 0 24px rgba(0, 255, 156, 0.08);
+            padding: 28px;
             position: relative;
-            z-index: 10;
         }
 
-        .logo {
-            text-align: center;
-            margin-bottom: 32px;
+        .terminal::before {
+            content: "";
+            position: absolute;
+            inset: 10px;
+            border: 1px dashed rgba(0, 255, 156, 0.15);
+            pointer-events: none;
         }
 
-        .logo h1 {
-            font-size: 2.5rem;
-            font-weight: 800;
-            letter-spacing: -1px;
-            background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .banner {
+            background: #000;
+            border: 1px solid var(--border);
+            padding: 16px 18px;
+            margin-bottom: 18px;
+            color: var(--accent);
+            font-size: 0.8rem;
+            line-height: 1.4;
+            text-transform: uppercase;
         }
 
         .tabs {
-            display: flex;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 4px;
-            border-radius: 12px;
-            margin-bottom: 32px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 18px;
         }
 
         .tab {
-            flex: 1;
             padding: 10px;
-            text-align: center;
-            cursor: pointer;
-            border-radius: 9px;
-            font-weight: 600;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid var(--border);
+            background: transparent;
             color: var(--text-dim);
+            text-transform: uppercase;
+            cursor: pointer;
         }
 
         .tab.active {
-            background: var(--primary);
-            color: white;
-            box-shadow: 0 4px 15px var(--primary-glow);
+            color: var(--accent);
+            background: var(--accent-soft);
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
 
         .form-group label {
             display: block;
-            margin-bottom: 8px;
-            font-size: 0.875rem;
+            margin-bottom: 6px;
+            font-size: 0.75rem;
             color: var(--text-dim);
+            text-transform: uppercase;
         }
 
         input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 14px 16px;
-            color: white;
-            font-size: 1rem;
-            transition: all 0.2s;
+            background: #000;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px;
+            font-size: 0.9rem;
         }
 
         input:focus {
             outline: none;
-            border-color: var(--primary);
-            background: rgba(255, 255, 255, 0.08);
-            box-shadow: 0 0 0 4px var(--primary-glow);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
         }
 
         .btn {
             width: 100%;
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            padding: 16px;
-            font-size: 1rem;
+            border: 1px solid var(--accent);
+            background: transparent;
+            color: var(--accent);
+            padding: 12px;
+            text-transform: uppercase;
             font-weight: 700;
             cursor: pointer;
-            transition: all 0.3s;
-            margin-top: 12px;
+            margin-top: 8px;
         }
 
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px var(--primary-glow);
-            filter: brightness(1.1);
-        }
-
-        .btn:active {
-            transform: translateY(0);
+            background: var(--accent-soft);
         }
 
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
-            transform: none;
         }
 
         .error-msg {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-            padding: 12px;
-            border-radius: 12px;
-            font-size: 0.875rem;
-            margin-bottom: 20px;
+            background: rgba(248, 113, 113, 0.12);
+            border: 1px solid rgba(248, 113, 113, 0.4);
+            color: var(--error);
+            padding: 10px;
+            font-size: 0.75rem;
+            margin-bottom: 16px;
             display: none;
         }
 
-        /* Result View */
         #result-view {
             display: none;
         }
 
+        .result-title {
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+
+        .result-sub {
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            margin-bottom: 16px;
+        }
+
         .eat-container {
-            background: rgba(0, 0, 0, 0.2);
             border: 1px dashed var(--accent);
-            padding: 20px;
-            border-radius: 16px;
-            margin: 24px 0;
+            padding: 16px;
+            margin: 16px 0;
             word-break: break-all;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
             color: var(--accent);
             position: relative;
+            background: #000;
         }
 
         .copy-success {
             position: absolute;
-            top: -30px;
+            top: -28px;
             right: 0;
             background: var(--accent);
-            color: var(--bg-dark);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 800;
+            color: #000;
+            padding: 4px 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
             opacity: 0;
             transition: opacity 0.3s;
         }
 
         .loader {
-            width: 24px;
-            height: 24px;
-            border: 3px solid rgba(255,255,255,0.3);
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: var(--accent);
             border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
+            animation: spin 1s linear infinite;
             display: none;
             margin: 0 auto;
         }
@@ -388,33 +359,28 @@ async def login_page(request: Request):
             to { transform: rotate(360deg); }
         }
 
-        .success-icon {
-            width: 64px;
-            height: 64px;
-            background: #10b981;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 24px;
-            box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
+        .footer {
+            margin-top: 16px;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            text-align: center;
         }
     </style>
 </head>
 <body>
-    <div class="bg-glow"></div>
-    <div class="bg-glow-2"></div>
-
-    <div class="portal-card">
+    <div class="terminal">
         <div id="auth-view">
-            <div class="logo">
-                <h1>ENGRAM</h1>
-                <p style="color: var(--text-dim); margin-top: 8px;">Identity Portal</p>
-            </div>
+            <pre class="banner">+------------------------------------------------------+
++   E N G R A M  ::  I D E N T I T Y  T E R M I N A L   +
++------------------------------------------------------+
++   NODE  : 127.0.0.1
++   ROUTE : /api/v1/auth/login
++------------------------------------------------------+</pre>
 
             <div class="tabs">
-                <div class="tab active" onclick="switchTab('login')">Login</div>
-                <div class="tab" onclick="switchTab('signup')">Sign Up</div>
+                <button class="tab active" onclick="switchTab('login')">LOGIN</button>
+                <button class="tab" onclick="switchTab('signup')">SIGNUP</button>
             </div>
 
             <div id="error-box" class="error-msg"></div>
@@ -426,7 +392,7 @@ async def login_page(request: Request):
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="password" required placeholder="••••••••">
+                    <input type="password" id="password" required placeholder="********">
                 </div>
                 
                 <button type="submit" class="btn" id="submit-btn">
@@ -437,11 +403,8 @@ async def login_page(request: Request):
         </div>
 
         <div id="result-view">
-            <div class="success-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </div>
-            <h2 style="text-align: center; margin-bottom: 8px;">Access Granted</h2>
-            <p style="text-align: center; color: var(--text-dim); font-size: 0.9rem; margin-bottom: 24px;">Paste this EAT token into your terminal to authenticate your session.</p>
+            <div class="result-title">Access Granted</div>
+            <div class="result-sub">Paste this EAT token into your terminal to authenticate.</div>
             
             <div class="eat-container" id="eat-display" onclick="copyToken()">
                 <div class="copy-success" id="copy-toast">COPIED</div>
@@ -449,9 +412,7 @@ async def login_page(request: Request):
             </div>
 
             <button class="btn" onclick="copyToken()">Copy Token</button>
-            <p style="text-align: center; margin-top: 24px; font-size: 0.8rem; color: var(--text-dim);">
-                You can now close this window safely.
-            </p>
+            <div class="footer">You can now close this window.</div>
         </div>
     </div>
 
@@ -513,13 +474,11 @@ async def login_page(request: Request):
                     throw new Error(authData.detail || 'Authentication failed');
                 }
 
-                // If signup, it might already have the EAT
                 if (authData.eat) {
                     showResult(authData.eat);
                     return;
                 }
 
-                // If login, generate EAT
                 const eatResponse = await fetch('/api/v1/auth/tokens/generate-eat', {
                     method: 'POST',
                     headers: { 
@@ -528,7 +487,7 @@ async def login_page(request: Request):
                     },
                     body: JSON.stringify({
                         semantic_scopes: ["execute:tool-invocation"],
-                        expires_minutes: 10080 // 1 week
+                        expires_minutes: 10080
                     })
                 });
 
@@ -554,7 +513,7 @@ async def login_page(request: Request):
     </script>
 </body>
 </html>
-    """
+"""
     return HTMLResponse(content=html_content)
 
 

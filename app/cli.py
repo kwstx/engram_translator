@@ -104,7 +104,8 @@ class CLIContext:
                     self.handle_auth_error(response)
                 if response.status_code >= 400:
                     try:
-                        error_detail = response.json().get("detail", response.text)
+                        error_data = response.json()
+                        error_detail = error_data.get("detail", response.text)
                     except:
                         error_detail = response.text
                     raise Exception(f"API Error ({response.status_code}): {error_detail}")
@@ -114,8 +115,14 @@ class CLIContext:
 
     def handle_auth_error(self, response):
         """Show helpful suggestions for authentication errors."""
-        rprint("\n[bold red][AUTH] Authentication Required[/]")
-        rprint("Your session has expired or the token is invalid.")
+        try:
+            error_data = response.json()
+            detail = error_data.get("detail", "Your session has expired or the token is invalid.")
+        except:
+            detail = "Your session has expired or the token is invalid."
+
+        rprint(f"\n[bold red][AUTH] Authentication Required[/]")
+        rprint(f"[red]{detail}[/]")
         rprint("\n[bold cyan]Suggestions:[/]")
         rprint("  1. Run [bold green]engram auth login[/] to re-authenticate.")
         rprint("  2. If using a manual token, check [bold]engram auth status[/].")
@@ -127,6 +134,8 @@ class CLIContext:
         token = self.get_token()
         if not token:
             return
+
+        token = token.strip()
 
         try:
             # Quick local JWT check if possible
@@ -265,7 +274,7 @@ def auth_login(
     Authenticate with the Engram backend to retrieve an EAT.
     """
     if token:
-        state.set_token(token)
+        state.set_token(token.strip())
         rprint("[OK] [bold green]Token saved securely via keyring.[/]")
         return
 
@@ -280,7 +289,7 @@ def auth_login(
     input_token = typer.prompt("EAT Token", hide_input=True)
     
     if input_token:
-        state.set_token(input_token)
+        state.set_token(input_token.strip())
         rprint("\n[bold green][OK] Login successful! Identity and permissions synced.[/]")
         auth_whoami()
     else:
@@ -371,7 +380,7 @@ def auth_token_set(token: str):
     """
     Manually set the Engram Authorization Token (EAT).
     """
-    state.set_token(token)
+    state.set_token(token.strip())
     rprint(f"[OK] EAT token updated securely.")
 
 @auth_app.command("status")
