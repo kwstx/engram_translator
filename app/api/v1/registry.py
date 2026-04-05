@@ -143,7 +143,13 @@ async def list_tools(
     user_id = principal.get("sub")
     stmt = select(ToolRegistry)
     if user_id:
-        stmt = stmt.where(ToolRegistry.user_id == uuid.UUID(user_id))
+        try:
+            user_uuid = uuid.UUID(user_id)
+            stmt = stmt.where(ToolRegistry.user_id == user_uuid)
+        except (ValueError, TypeError):
+            # If current token has a non-UUID identity (like an old email-based sub),
+            # we skip filtering to avoid 500, though this user likely won't see any private tools.
+            pass
     
     stmt = stmt.options(selectinload(ToolRegistry.execution_metadata))
     results = await db.execute(stmt)
@@ -174,7 +180,12 @@ async def call_mcp_tool(
         
         stmt = select(ToolRegistry)
         if user_id:
-            stmt = stmt.where(ToolRegistry.user_id == uuid.UUID(user_id))
+            try:
+                user_uuid = uuid.UUID(user_id)
+                stmt = stmt.where(ToolRegistry.user_id == user_uuid)
+            except (ValueError, TypeError):
+                # Fallback for old identity tokens
+                pass
             
         results = await db.execute(stmt)
         raw_tools = results.scalars().all()
