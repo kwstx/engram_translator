@@ -41,6 +41,7 @@ from rich import print as rprint
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
 from rich.live import Live
+from rich.prompt import Prompt
 
 # Constants
 APP_NAME = "engram"
@@ -746,8 +747,20 @@ def register_manual_tool():
     rprint("\n[bold cyan]Engram Manual Tool Registration[/]")
     rprint("[dim]This interactive session will guide you through registering a tool without an OpenAPI spec.[/]\n")
 
-    # Initial entry point for the interactive session logic
-    rprint("[yellow]Interactive session initiated. Use this to define tool name, endpoint, and parameters manually.[/]")
+    # Interactive Wizard
+    name = Prompt.ask("[bold cyan]Tool Name[/]")
+    description = Prompt.ask("[bold cyan]Description[/]")
+    base_url = Prompt.ask("[bold cyan]Base URL[/] (e.g., https://api.weather.com)")
+    path = Prompt.ask("[bold cyan]Path[/] (e.g., /v1/current)")
+    method = Prompt.ask(
+        "[bold cyan]HTTP Method[/]", 
+        choices=["GET", "POST", "PUT", "DELETE"], 
+        default="GET"
+    )
+
+    # Progress Summary (for Step 5 confirmation)
+    rprint(f"\n[green]Prepared tool configuration for [bold]{name}[/].[/]")
+    rprint(f"[dim]Endpoint: {method} {base_url}{path}[/]\n")
 
 
 # --- Heal Subgroup ---
