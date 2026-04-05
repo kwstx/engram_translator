@@ -771,7 +771,7 @@ def register_manual_tool():
     rprint("\n[bold yellow]Define Parameters[/] (Press Enter on 'Parameter Name' to finish)")
     parameters = []
     while True:
-        param_name = Prompt.ask("[cyan]Parameter Name[/ (leave blank to finish)]", default="")
+        param_name = Prompt.ask("[cyan]Parameter Name[/] (leave blank to finish)", default="")
         if not param_name:
             break
         
@@ -802,12 +802,14 @@ def register_manual_tool():
     
     # Payload matches ManualToolCreate + agent_id embedded
     payload = {
-        "name": name,
-        "description": description,
-        "base_url": base_url,
-        "endpoint_path": path,
-        "method": method,
-        "parameters": parameters,
+        "data": {
+            "name": name,
+            "description": description,
+            "base_url": base_url,
+            "endpoint_path": path,
+            "method": method,
+            "parameters": parameters
+        },
         "agent_id": target_agent
     }
 
