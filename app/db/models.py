@@ -66,6 +66,7 @@ class AgentRegistry(SQLModel, table=True):
     
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     agent_id: uuid.UUID = Field(index=True, nullable=False, unique=True)
+    user_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id", index=True)
     supported_protocols: List[str] = Field(
         default=[], 
         sa_type=JSON
@@ -103,6 +104,7 @@ class ToolRegistry(SQLModel, table=True):
     
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     agent_id: uuid.UUID = Field(foreign_key="agent_registry.agent_id", index=True, nullable=False)
+    user_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id", index=True)
     agent: "AgentRegistry" = Relationship(back_populates="tools")
     name: str = Field(index=True, nullable=False)
     description: str = Field(nullable=False)

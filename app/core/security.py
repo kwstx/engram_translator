@@ -215,12 +215,14 @@ async def get_current_principal(
 
     # Validate session for stateful check if session ID is present
     session_id = payload.get("sid")
-    if session_id:
+    # Validate session for stateful check if session ID is present and Redis is enabled
+    if session_id and settings.REDIS_ENABLED:
         session_data = SessionService.get_session(session_id)
         if not session_data:
             raise HTTPException(status_code=401, detail="Session expired or revoked.")
-    # Slide session expiration
-    if session_id:
+            
+    # Slide session expiration if Redis is enabled
+    if session_id and settings.REDIS_ENABLED:
         SessionService.extend_session(session_id)
 
     payload["_raw_token"] = token

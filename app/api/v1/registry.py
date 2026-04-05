@@ -37,28 +37,36 @@ logger = structlog.get_logger(__name__)
 async def ingest_openapi(
     url_or_path: str = Body(..., embed=True),
     agent_id: str = Body(..., embed=True),
-    db: Session = Depends(get_session)
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
 ):
     """
     Ingests an OpenAPI spec and registers its tools.
     """
     service = RegistryService(db)
     agent_uuid = uuid.UUID(agent_id)
-    tool = await service.ingest_openapi(url_or_path, agent_uuid)
+    user_id_str = principal.get("sub")
+    user_uuid = uuid.UUID(user_id_str) if user_id_str else None
+    
+    tool = await service.ingest_openapi(url_or_path, agent_uuid, user_id=user_uuid)
     return tool
 
 @router.post("/ingest/cli", status_code=status.HTTP_201_CREATED)
 async def ingest_cli(
     command: str = Body(..., embed=True),
     agent_id: str = Body(..., embed=True),
-    db: Session = Depends(get_session)
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
 ):
     """
     Ingests a CLI tool by parsing its --help output.
     """
     service = RegistryService(db)
     agent_uuid = uuid.UUID(agent_id)
-    tool = await service.ingest_cli_help(command, agent_uuid)
+    user_id_str = principal.get("sub")
+    user_uuid = uuid.UUID(user_id_str) if user_id_str else None
+    
+    tool = await service.ingest_cli_help(command, agent_uuid, user_id=user_uuid)
     return tool
 
 
@@ -66,27 +74,35 @@ async def ingest_cli(
 async def ingest_docs(
     docs_text: str = Body(..., embed=True),
     agent_id: str = Body(..., embed=True),
-    db: Session = Depends(get_session)
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
 ):
     """
     Ingests tools from partial documentation text using LLM extraction.
     """
     service = RegistryService(db)
     agent_uuid = uuid.UUID(agent_id)
-    tool = await service.extract_from_docs(docs_text, agent_uuid)
+    user_id_str = principal.get("sub")
+    user_uuid = uuid.UUID(user_id_str) if user_id_str else None
+    
+    tool = await service.extract_from_docs(docs_text, agent_uuid, user_id=user_uuid)
     return tool
 
 @router.post("/manual", status_code=status.HTTP_201_CREATED)
 async def register_manual_tool(
     data: ManualToolCreate,
     agent_id: uuid.UUID = Body(..., embed=True),
-    db: Session = Depends(get_session)
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
 ):
     """
     Manually registers a tool with its specific HTTP details and parameters.
     """
     service = RegistryService(db)
-    tool = await service.create_manual_tool(data, agent_id)
+    user_id_str = principal.get("sub")
+    user_uuid = uuid.UUID(user_id_str) if user_id_str else None
+    
+    tool = await service.create_manual_tool(data, agent_id, user_id=user_uuid)
     return tool
 
 from sqlalchemy.orm import selectinload
@@ -117,11 +133,19 @@ class ToolRead(BaseModel):
     execution_metadata: Optional[ToolExecutionMetadataRead] = None
 
 @router.get("/tools", response_model=List[ToolRead])
-async def list_tools(db: Session = Depends(get_session)):
+async def list_tools(
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
     """
     List all registered tools including their execution backend metadata.
     """
-    stmt = select(ToolRegistry).options(selectinload(ToolRegistry.execution_metadata))
+    user_id = principal.get("sub")
+    stmt = select(ToolRegistry)
+    if user_id:
+        stmt = stmt.where(ToolRegistry.user_id == uuid.UUID(user_id))
+    
+    stmt = stmt.options(selectinload(ToolRegistry.execution_metadata))
     results = await db.execute(stmt)
     return results.scalars().all()
 
@@ -146,7 +170,14 @@ async def call_mcp_tool(
     if method == "mcp.list_tools":
         task_intent = params.get("task_intent", "")
         conversation_history = params.get("conversation_history", [])
-        raw_tools = db.exec(select(ToolRegistry)).all()
+        user_id = principal.get("sub")
+        
+        stmt = select(ToolRegistry)
+        if user_id:
+            stmt = stmt.where(ToolRegistry.user_id == uuid.UUID(user_id))
+            
+        results = await db.execute(stmt)
+        raw_tools = results.scalars().all()
         
         # Pre-routing step to dynamically dynamically filter the tool list
         pruned_tools = context_aware_prune_tools(raw_tools, task_intent, conversation_history)

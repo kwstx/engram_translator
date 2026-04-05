@@ -24,7 +24,7 @@ class RegistryService:
         self.db = db
         self.llm = LLMService()
 
-    async def ingest_openapi(self, url_or_path: str, agent_id: uuid.UUID) -> ToolRegistry:
+    async def ingest_openapi(self, url_or_path: str, agent_id: uuid.UUID, user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Ingest tools from an OpenAPI spec."""
         try:
             parser = ResolvingParser(url_or_path)
@@ -53,6 +53,7 @@ class RegistryService:
             
             tool = ToolRegistry(
                 agent_id=agent_id,
+                user_id=user_id,
                 name=tool_name,
                 description=description,
                 actions=actions
@@ -79,13 +80,14 @@ class RegistryService:
             logger.error("Failed to ingest OpenAPI", error=str(e))
             raise ValidationError(f"OpenAPI ingestion failed: {str(e)}")
 
-    async def ingest_graphql(self, url: str, agent_id: uuid.UUID, auth_details: Optional[Dict[str, Any]] = None) -> ToolRegistry:
+    async def ingest_graphql(self, url: str, agent_id: uuid.UUID, auth_details: Optional[Dict[str, Any]] = None, user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Ingest tools from a GraphQL service via introspection."""
         # For simplicity, we create a generic GraphQL tool entry.
         # In a real implementation, we would perform an introspection query and populate actions.
         
         tool = ToolRegistry(
             agent_id=agent_id,
+            user_id=user_id,
             name=f"GraphQL Service ({url})",
             description="Auto-onboarded GraphQL API",
             actions=[{"name": "query", "description": "Generic GraphQL query execution"}]
@@ -103,10 +105,11 @@ class RegistryService:
         await self.db.commit()
         return tool
 
-    async def ingest_url_with_auth(self, url: str, agent_id: uuid.UUID, auth: Dict[str, Any]) -> ToolRegistry:
+    async def ingest_url_with_auth(self, url: str, agent_id: uuid.UUID, auth: Dict[str, Any], user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Onboard a raw URL with specified auth details."""
         tool = ToolRegistry(
             agent_id=agent_id,
+            user_id=user_id,
             name=f"HTTP Endpoint ({url})",
             description="Manually onboarded URL",
             actions=[{"name": "call", "description": "Call the specific URL"}]
@@ -124,7 +127,7 @@ class RegistryService:
         await self.db.commit()
         return tool
 
-    async def ingest_cli_help(self, command: str, agent_id: uuid.UUID) -> ToolRegistry:
+    async def ingest_cli_help(self, command: str, agent_id: uuid.UUID, user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Parse --help output of a CLI tool and create a thin wrapper."""
         try:
             result = subprocess.run([command, "--help"], capture_output=True, text=True, check=True)
@@ -138,6 +141,7 @@ class RegistryService:
 
             tool = ToolRegistry(
                 agent_id=agent_id,
+                user_id=user_id,
                 name=command,
                 description=f"CLI wrapper for {command}",
                 actions=actions
@@ -177,7 +181,7 @@ class RegistryService:
             logger.error("CLI help ingestion failed", command=command, error=str(e))
             raise ValidationError(f"CLI ingestion failed: {str(e)}")
 
-    async def create_manual_tool(self, data: ManualToolCreate, agent_id: uuid.UUID) -> ToolRegistry:
+    async def create_manual_tool(self, data: ManualToolCreate, agent_id: uuid.UUID, user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Manually register a tool with a synthetic OpenAPI schema."""
         try:
             # Generate synthetic OpenAPI spec
@@ -194,6 +198,7 @@ class RegistryService:
             
             tool = ToolRegistry(
                 agent_id=agent_id,
+                user_id=user_id,
                 name=data.name,
                 description=data.description,
                 actions=actions
@@ -266,12 +271,13 @@ class RegistryService:
         }
         return spec
 
-    async def extract_from_docs(self, docs_text: str, agent_id: uuid.UUID) -> ToolRegistry:
+    async def extract_from_docs(self, docs_text: str, agent_id: uuid.UUID, user_id: Optional[uuid.UUID] = None) -> ToolRegistry:
         """Use LLM-assisted extraction (Phi-3/LLMService) to register a tool from partial docs."""
         extracted = await self.llm.extract_tool_schema(docs_text)
         
         tool = ToolRegistry(
             agent_id=agent_id,
+            user_id=user_id,
             name=extracted["name"],
             description=extracted["description"],
             actions=extracted["actions"]

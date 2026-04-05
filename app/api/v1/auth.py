@@ -492,7 +492,9 @@ async def login_page(request: Request):
                 });
 
                 const eatData = await eatResponse.json();
-                if (!eatResponse.ok) throw new Error('Failed to generate agent token');
+                if (!eatResponse.ok) {
+                    throw new Error(eatData.detail || 'Failed to generate agent token');
+                }
                 
                 showResult(eatData.eat);
 
