@@ -227,6 +227,7 @@ class RegistryService:
             openapi_parameters.append({
                 "name": p.name,
                 "in": "query",  # Default to query parameters for manual tools
+                "description": p.description,
                 "required": p.required,
                 "schema": {
                     "type": p.type

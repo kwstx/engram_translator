@@ -4,6 +4,7 @@ from typing import List, Optional
 class ToolParameter(BaseModel):
     name: str
     type: str  # e.g., "string", "integer", "boolean"
+    description: str
     required: bool
 
 class ManualToolCreate(BaseModel):

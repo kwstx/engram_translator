@@ -758,9 +758,36 @@ def register_manual_tool():
         default="GET"
     )
 
+    # Capture Parameters (Step 6)
+    rprint("\n[bold yellow]Define Parameters[/] (Press Enter on 'Parameter Name' to finish)")
+    parameters = []
+    while True:
+        param_name = Prompt.ask("[cyan]Parameter Name[/ (leave blank to finish)]", default="")
+        if not param_name:
+            break
+        
+        param_type = Prompt.ask(
+            "[cyan]Parameter Type[/]",
+            choices=["string", "integer", "boolean", "number", "array", "object"],
+            default="string"
+        )
+        param_desc = Prompt.ask("[cyan]Parameter Description[/]", default=f"Description for {param_name}")
+        param_required = Prompt.ask("[cyan]Is required?[/]", choices=["yes", "no"], default="yes") == "yes"
+
+        parameters.append({
+            "name": param_name,
+            "type": param_type,
+            "description": param_desc,
+            "required": param_required
+        })
+
     # Progress Summary (for Step 5 confirmation)
-    rprint(f"\n[green]Prepared tool configuration for [bold]{name}[/].[/]")
-    rprint(f"[dim]Endpoint: {method} {base_url}{path}[/]\n")
+    rprint(f"\n[bold green]Prepared tool configuration for '{name}'[/]")
+    rprint(f"[dim]Endpoint: {method} {base_url}{path}[/]")
+    if parameters:
+        rprint(f"[dim]Parameters ({len(parameters)}): {', '.join(p['name'] for p in parameters)}[/]\n")
+    else:
+        rprint("[dim]Parameters: None[/]\n")
 
 
 # --- Heal Subgroup ---
