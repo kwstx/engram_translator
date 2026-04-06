@@ -21,7 +21,7 @@ Semantic Bridge solves brittle agent tool integrations that break in production.
 ## Quick Install
 
 ```bash
-curl -fsSL https://get.semanticbridge.dev/install | bash
+curl -fsSL https://get.engram.dev/install | bash
 ```
 
 Works on Linux, macOS, and WSL2. The installer sets up Python dependencies, the `sb` CLI, and core services.
@@ -69,7 +69,7 @@ Most tool platforms give you connectors that break on custom fields or API chang
 
 ## Documentation
 
-Full documentation lives at docs.semanticbridge.dev:
+Full documentation lives at docs.engram.dev:
 
 - Quickstart — Install to first connected tool in under 5 minutes
 - CLI Reference — All commands and flags
