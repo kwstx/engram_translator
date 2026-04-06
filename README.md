@@ -1,4 +1,4 @@
-![Engram](assets/engram-header.png)
+![Engram](https://raw.githubusercontent.com/kwstx/engram_translator/main/assets/engram-header.png)
 
 # Engram
 
