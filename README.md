@@ -1,3 +1,5 @@
+![Engram](assets/engram-header.png)
+
 # Engram
 
 The adaptive semantic interoperability layer for AI agents. Connect **anything** — any API, any system, any protocol — with one lightweight layer that auto-generates tools, self-heals schema drift, intelligently routes between MCP and CLI, and scales seamlessly from single agents to multi-agent swarms.
