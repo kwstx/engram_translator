@@ -38,8 +38,14 @@ from app.db.session import init_db
 from contextlib import asynccontextmanager
 
 # Configure structured logging
-configure_logging()
-logger = structlog.get_logger(__name__)
+try:
+    configure_logging()
+    logger = structlog.get_logger(__name__)
+    logger.info("Application starting version 1.0.0", env=settings.ENVIRONMENT)
+except Exception as e:
+    print(f"CRITICAL: Logging configuration failed: {e}")
+    import sys
+    sys.exit(1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

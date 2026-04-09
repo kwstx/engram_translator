@@ -187,8 +187,20 @@ class SwarmMemory:
             }
         return None
 
-# Singleton instance
-memory_backend = SwarmMemory()
+_memory_backend = None
+
+def get_memory_backend() -> SwarmMemory:
+    global _memory_backend
+    if _memory_backend is None:
+        _memory_backend = SwarmMemory()
+    return _memory_backend
+
+# We provide a wrapper for backward compatibility or direct use if needed
+class SwarmMemoryProxy:
+    def __getattr__(self, name):
+        return getattr(get_memory_backend(), name)
+        
+memory_backend = SwarmMemoryProxy()
 
 @router.post("/memory/write")
 async def write_memory(request: MemoryWriteRequest):

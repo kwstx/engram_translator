@@ -214,5 +214,17 @@ class IntentResolver:
         }
         return mapping.get(task.intent, "general_purpose")
 
-# Shared instance if needed
-intent_resolver = IntentResolver()
+_intent_resolver = None
+
+def get_intent_resolver() -> IntentResolver:
+    global _intent_resolver
+    if _intent_resolver is None:
+        _intent_resolver = IntentResolver()
+    return _intent_resolver
+
+# Shared proxy
+class IntentResolverProxy:
+    def __getattr__(self, name):
+        return getattr(get_intent_resolver(), name)
+
+intent_resolver = IntentResolverProxy()
