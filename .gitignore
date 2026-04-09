@@ -157,3 +157,9 @@ cython_debug/
 node_modules/
 cypress/screenshots/
 cypress/videos/
+
+# Engram DB
+engram.db
+engram.db-shm
+engram.db-wal
+
