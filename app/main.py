@@ -1,154 +1,124 @@
-import sentry_sdk
-from fastapi import FastAPI, HTTPException, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+import os
+import uvicorn
 import structlog
-from app.core.config import settings
-from app.core.exceptions import TranslatorError, ValidationError
-
-if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        environment=settings.ENVIRONMENT,
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for performance monitoring.
-        traces_sample_rate=1.0,
-        # Set profiles_sample_rate to 1.0 to profile 100%
-        # of transactions.
-        profiles_sample_rate=1.0,
-    )
+from fastapi import FastAPI, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
-from fastapi.middleware.cors import CORSMiddleware
+from slowapi.util import get_remote_address
+
 from app.api.v1 import (
-    endpoints,
-    discovery,
     auth,
-    permissions,
-    credentials,
-    orchestration,
-    tasks,
-    workflows,
-    registry,
-    events,
-    tracing,
     catalog,
-    reconciliation,
-    routing,
+    credentials,
+    discovery,
+    endpoints,
+    events,
     evolution,
+    orchestration,
+    permissions,
+    reconciliation,
+    registry,
+    routing,
+    tasks,
+    tracing,
+    workflows,
     federation,
 )
-from bridge.memory import router as memory_router
+from bridge.memory_router import router as memory_router
 from app.core.config import settings
+from app.core.exceptions import TranslatorError, ValidationError
 from app.core.logging import configure_logging
 from app.db.session import init_db
-from app.services.task_worker import TaskWorker
-from app.services.workflow_scheduler import WorkflowScheduler
-from app.services.event_listener import EventListener
 from contextlib import asynccontextmanager
-import uuid
-from sqlmodel import select
-from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.services.discovery import DiscoveryService
-
+# Configure structured logging
 configure_logging()
 logger = structlog.get_logger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    logger.info("Starting Engram Middleware...")
+    
+    # 1. Initialize Database & Run Migrations
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error("Failed to initialize database", error=str(e))
+        # Don't raise here if we want to allow the app to start even with DB issues (e.g. for health checks)
+        # But for middleware, DB is usually critical.
+    
+    # 2. Start Background Services
+    from app.main import discovery_service, event_listener, task_worker, workflow_scheduler
+    
+    await discovery_service.start_periodic_discovery()
+    await event_listener.start()
+    await task_worker.start()
+    await workflow_scheduler.start()
+    
+    # 3. Seed Catalog (optional, for demo/dev)
+    if not settings.LOW_MEMORY_MODE:
+        from app.services.catalog_service import CatalogService
+        from app.db.session import engine
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        
+        async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as session:
+            catalog_svc = CatalogService(session)
+            await catalog_svc.seed_default_catalog()
+            
+        # 4. Warm up registry (Optional: caches agent capabilities)
+        from app.services.registry_service import RegistryService
+        async with async_session() as session:
+            registry_svc = RegistryService(session)
+            await registry_svc.warm_up()
+            
+    logger.info("Engram Middleware ready.")
+    
+    yield
+    
+    # Shutdown logic
+    logger.info("Shutting down Engram Middleware...")
+    from app.main import discovery_service, event_listener, task_worker, workflow_scheduler
+    await discovery_service.stop_periodic_discovery()
+    await event_listener.stop()
+    await task_worker.stop()
+    await workflow_scheduler.stop()
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version="1.0.0",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
+)
+
+# Initialize services (outside lifespan for access in routes, but started in lifespan)
+from app.services.discovery import DiscoveryService
+from app.services.event_listener import EventListener
+from app.services.task_worker import TaskWorker
+from app.services.workflow_scheduler import WorkflowScheduler
 
 discovery_service = DiscoveryService()
 task_worker = TaskWorker()
 workflow_scheduler = WorkflowScheduler()
 event_listener = EventListener()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Store services in app state for access from routers
-    app.state.discovery_service = discovery_service
-    app.state.task_worker = task_worker
-    app.state.workflow_scheduler = workflow_scheduler
-    app.state.event_listener = event_listener
-    
-    # Initialize DB (create tables if they don't exist)
-    await init_db()
-    
-    # Auto-start background services (Orchestration Loop)
-    await discovery_service.start_periodic_discovery()
-    await task_worker.start()
-    await workflow_scheduler.start()
-    await event_listener.start()
-    
-    # Seed the popular apps catalog
-    if not settings.LOW_MEMORY_MODE:
-        try:
-            from app.services.catalog_service import CatalogService
-            from app.db.session import get_session
-            import os
-            async for db in get_session():
-                service = CatalogService(db)
-                seed_path = os.path.join(os.path.dirname(__file__), "catalog", "seed_data.yaml")
-                if os.path.exists(seed_path):
-                    await service.seed_catalog_from_yaml(seed_path)
-                
-                # Pre-populate some popular tools for immediate discoverability
-                system_agent_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
-                from app.db.models import AgentRegistry
-                stmt = select(AgentRegistry).where(AgentRegistry.agent_id == system_agent_id)
-                result = await db.execute(stmt)
-                if not result.scalars().first():
-                    db.add(AgentRegistry(
-                        agent_id=system_agent_id,
-                        endpoint_url="http://localhost:8000",
-                        supported_protocols=["MCP", "CLI", "HTTP"]
-                    ))
-                    await db.commit()
-                    
-                entries = await service.get_entries()
-                for entry in entries:
-                    if not entry.is_cached:
-                        await service.warm_up_registry(entry.slug, system_agent_id)
-                break # Just need one session
-        except Exception as e:
-            logger.error("Failed to seed catalog during startup", error=str(e))
-    else:
-        logger.info("Skipping catalog seeding and warm-up due to LOW_MEMORY_MODE")
-    
-    logger.info("Engram orchestration services started automatically via lifespan.")
-    from rich import print as rprint
-    from rich.panel import Panel
-    rprint(Panel.fit(
-        "[bold green][DONE] GATEWAY ACTIVE[/bold green]\n"
-        "[dim]Listening on[/dim] [bold]http://127.0.0.1:8000[/bold]\n"
-        "[dim]API docs at[/dim]  [bold]http://127.0.0.1:8000/docs[/bold]\n\n"
-        "[dim]Open a new terminal and run[/dim] [bold cyan]./engram <command>[/bold cyan] [dim]to interact.[/dim]\n"
-        "[dim]Press[/dim] [bold]CTRL+C[/bold] [dim]here to stop the server.[/dim]",
-        border_style="green",
-    ))
-    
-    yield
-    
-    # Graceful shutdown
-    await discovery_service.stop_periodic_discovery()
-    await task_worker.stop()
-    await workflow_scheduler.stop()
-    await event_listener.stop()
-
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="Bridge for A2A, MCP, and ACP protocols with semantic mapping.",
-    version="0.1.0",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Set all CORS enabled origins
+if settings.BACKEND_CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
@@ -165,7 +135,6 @@ async def translator_exception_handler(request, exc: TranslatorError):
     status_code = status.HTTP_400_BAD_REQUEST
     if isinstance(exc, ValidationError):
         status_code = status.HTTP_400_BAD_REQUEST
-    # Mapping other exception types if needed
     
     logger.warning(
         "Translator logic error handled",
@@ -185,10 +154,8 @@ if settings.RATE_LIMIT_ENABLED:
     app.add_middleware(SlowAPIMiddleware)
 
 if settings.HTTPS_ONLY:
-    # Forces all requests to be redirected to HTTPS
     app.add_middleware(HTTPSRedirectMiddleware)
 
-# Security Headers Middleware
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
@@ -197,7 +164,6 @@ async def add_security_headers(request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     
-    # Relax CSP to allow Swagger UI assets (JS/CSS) from CDNs
     csp = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -207,7 +173,6 @@ async def add_security_headers(request, call_next):
     )
     response.headers["Content-Security-Policy"] = csp
     return response
-
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
@@ -238,3 +203,13 @@ app.include_router(evolution.router, prefix=settings.API_V1_STR + "/evolution", 
 app.include_router(federation.router, prefix=settings.API_V1_STR)
 app.include_router(memory_router, prefix=settings.API_V1_STR)
 
+if __name__ == "__main__":
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        workers=int(os.getenv("UVICORN_WORKERS", 1)),
+        log_config=None,
+        lifespan="on",
+        lifespan_timeout=120  # Double from default to allow slow migrations
+    )
