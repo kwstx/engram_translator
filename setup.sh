@@ -10,17 +10,17 @@ echo "=== Engram Installation ==="
 # 1. Prepare directory
 mkdir -p "$ENGRAM_DIR"
 
-# 2. Download and extract (mimicking requested curl logic)
+# 2. Download and extract
 echo "Downloading Engram runtime..."
-# In a real scenario, we'd use:
-# curl -fsSL "$ENGINE_URL" | tar -xz -C "$ENGRAM_DIR"
-# For implementation, we assume files are already available locally for the user to package,
-# but we provide the script that performs the extraction logic.
-if [ -f "engram.tar.gz" ]; then
-    tar -xzf engram.tar.gz -C "$ENGRAM_DIR"
+# If we are running as a one-liner, we need to download the source
+if [ ! -f "engram.tar.gz" ]; then
+    echo "Local tarball not found, downloading from source..."
+    # You can point this to the GitHub repo's main branch tarball or a specific release
+    curl -fsSL "https://github.com/kwstx/engram_translator/archive/refs/heads/main.tar.gz" -o engram.tar.gz
+    tar -xzf engram.tar.gz --strip-components=1 -C "$ENGRAM_DIR"
+    rm engram.tar.gz
 else
-    # Fallback to copying files if tarball not found during local testing of this script
-    cp -r . "$ENGRAM_DIR"
+    tar -xzf engram.tar.gz -C "$ENGRAM_DIR"
 fi
 
 # 3. Create CLI wrapper
