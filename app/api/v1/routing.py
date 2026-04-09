@@ -130,6 +130,23 @@ async def test_routing(
     if request.force_backend:
         reasoning += f" (Manual override: forced {request.force_backend})"
 
+    # 4. Record a semantic trace of the simulation (Production Observability)
+    from app.services.semantic_trace import SemanticTrace, record_trace
+    record_trace(SemanticTrace(
+        tool_name=best_tool.name,
+        action="simulation",
+        routing_choice=best_overall_decision.backend,
+        backend_used="simulator",
+        similarity_score=best_cand.similarity,
+        composite_score=best_cand.composite_score,
+        token_cost_est=best_cand.token_cost_est,
+        context_overhead_est=best_cand.context_overhead_est,
+        reconciliation_steps=["routing_simulation", "ontology_alignment_check"],
+        ontological_interpretation=reasoning,
+        success=True,
+        latency_ms=best_cand.latency_ms,
+    ))
+
     return RouteTestResponse(
         tool_name=best_tool.name,
         selected_backend=best_overall_decision.backend,
