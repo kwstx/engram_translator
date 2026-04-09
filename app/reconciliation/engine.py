@@ -2,8 +2,10 @@ import os
 import uuid
 import structlog
 from typing import Dict, Any, List, Optional, Tuple
+import gc
 import torch
 from sentence_transformers import SentenceTransformer, util
+from app.core.config import settings
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -16,14 +18,32 @@ from app.reconciliation.ontology import OntologyResolver
 logger = structlog.get_logger(__name__)
 
 class ReconciliationEngine:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: Optional[str] = None):
         self.ontology = OntologyResolver()
-        self.model = SentenceTransformer(model_name)
+        self._model_name = model_name or settings.RECONCILIATION_MODEL
+        self._model = None
+        self._ontology_embeddings = None
         self.ontology_concepts = self.ontology.get_concept_names()
-        # Precompute ontology embeddings
-        self.ontology_embeddings = self.model.encode(self.ontology_concepts, convert_to_tensor=True)
         self.similarity_threshold = 0.60
         self.auto_apply_threshold = 0.70
+
+    @property
+    def model(self):
+        if self._model is None:
+            logger.info("Loading semantic model", model=self._model_name)
+            self._model = SentenceTransformer(self._model_name)
+            if settings.LOW_MEMORY_MODE:
+                torch.set_num_threads(1)
+        return self._model
+
+    @property
+    def ontology_embeddings(self):
+        if self._ontology_embeddings is None:
+            # Precompute ontology embeddings
+            self._ontology_embeddings = self.model.encode(self.ontology_concepts, convert_to_tensor=True)
+            if settings.LOW_MEMORY_MODE:
+                gc.collect()
+        return self._ontology_embeddings
 
     def get_session(self):
         return sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)()

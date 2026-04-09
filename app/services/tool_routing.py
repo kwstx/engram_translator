@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import time
 from dataclasses import dataclass
@@ -202,7 +203,12 @@ _DEFAULT_BACKEND_STATS = BackendStats(
 
 @lru_cache(maxsize=1)
 def _embedding_model() -> SentenceTransformer:
-    return SentenceTransformer(settings.ROUTING_EMBEDDING_MODEL)
+    logger.info("Loading routing embedding model", model=settings.ROUTING_EMBEDDING_MODEL)
+    model = SentenceTransformer(settings.ROUTING_EMBEDDING_MODEL)
+    if settings.LOW_MEMORY_MODE:
+        torch.set_num_threads(1)
+        gc.collect()
+    return model
 
 
 @lru_cache(maxsize=2048)

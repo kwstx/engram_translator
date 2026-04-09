@@ -127,7 +127,9 @@ class Settings(BaseSettings):
     SLACK_API_TOKEN: Optional[str] = None
 
     # Tool routing
-    ROUTING_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    ROUTING_EMBEDDING_MODEL: str = "paraphrase-MiniLM-L3-v2"
+    RECONCILIATION_MODEL: str = "paraphrase-MiniLM-L3-v2"
+    LOW_MEMORY_MODE: bool = True
     ROUTING_STATS_WINDOW_HOURS: int = 168
     ROUTING_CACHE_TTL_SECONDS: int = 60
     ROUTING_WEIGHT_SIMILARITY: float = 0.55

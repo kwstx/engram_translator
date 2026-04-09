@@ -15,7 +15,9 @@ services:
       - key: UVICORN_WORKERS
         value: "1"
       - key: ML_ENABLED
-        value: "false"
+        value: "true"
+      - key: LOW_MEMORY_MODE
+        value: "true"
       - key: AUTH_ISSUER
         sync: false
       - key: AUTH_AUDIENCE
