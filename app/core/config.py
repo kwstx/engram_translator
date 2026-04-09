@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     SENTRY_DSN: Optional[str] = None
     RATE_LIMIT_DEFAULT: str = "100/minute"
     RATE_LIMIT_ENABLED: bool = True
+    LOW_MEMORY_MODE: bool = False
+
 
     
     # Core Runtime (from ~/.engram/config.yaml)
