@@ -32,4 +32,5 @@ ENV UVICORN_WORKERS=1
 ENV PYTHONPATH=/app
 
 # Increase lifespan timeout to allow for slow migrations and model loading
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --lifespan-timeout 120"]
+# We use the programmatic entry point because the uvicorn CLI lacks a --lifespan-timeout flag
+CMD ["python", "app/main.py"]
