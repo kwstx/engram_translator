@@ -97,7 +97,9 @@ class CLIContext:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         
-        with httpx.Client(headers=headers, timeout=30.0) as client:
+        # Use a robust client configuration to prevent connection issues in diverse 
+        # environments (e.g. bypass machine-level proxies for local requests).
+        with httpx.Client(headers=headers, timeout=30.0, trust_env=False) as client:
             try:
                 response = client.request(method, url, **kwargs)
                 if response.status_code == 401:
@@ -1797,9 +1799,10 @@ def _start_interactive_cli(host: str, port: int):
             _print_repl_help()
             continue
 
-        # Delegate to the Typer CLI using subprocess which handles Windows quoting correctly.
-        parts = cmd.split()
+        # Delegate to the Typer CLI using shlex to respect quotes (e.g. for task descriptions).
+        import shlex
         try:
+            parts = shlex.split(cmd)
             subprocess.run([sys.executable, os.path.abspath(__file__)] + parts)
         except Exception as e:
             rprint(f"[bold red]Execution Error:[/] {e}")
