@@ -99,9 +99,11 @@ class Scope:
         
         self.tools = list(tools)
         self.step_id = step_id or str(uuid.uuid4())
+        self.name: Optional[str] = None
         self.corrected_schemas: Dict[str, Any] = {}
         self.routing_decisions: Dict[str, str] = {}
         self.validation_timestamp: Optional[float] = None
+        self._sdk: Optional[Any] = None
 
     @property
     def tool_count(self) -> int:
@@ -248,7 +250,26 @@ class Scope:
         return instance
 
     def __repr__(self) -> str:
-        return f"Scope(step_id={self.step_id!r}, tools={self.tools!r}, drift={bool(self.corrected_schemas)})"
+        name_str = f", name={self.name!r}" if self.name else ""
+        return f"Scope(step_id={self.step_id!r}{name_str}, tools={self.tools!r}, drift={bool(self.corrected_schemas)})"
+
+    def __enter__(self) -> "Scope":
+        """
+        Activates the scope when entering a 'with' block.
+        If an SDK was provided during creation, it validates and activates automatically.
+        """
+        if self._sdk:
+            self.validate(self._sdk)
+            self.activate(self._sdk)
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Deactivates the scope when exiting a 'with' block.
+        Implementation note: Currently does not perform explicit server-side deactivation 
+        as scopes have a TTL, but this provides a hook for future cleanup.
+        """
+        pass
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Scope):

@@ -182,6 +182,46 @@ class EngramSDK:
             beta=beta,
         )
 
+    def scope(self, name: str, tools: Optional[List[str]] = None) -> Scope:
+        """
+        Context manager for narrowing tool availability for a specific agent turn.
+        
+        If 'tools' is provided, it creates an ad-hoc scope.
+        Otherwise, it fetches the pre-registered tool set for the given 'name' 
+        from the Engram registry.
+        
+        Example:
+            with sdk.scope("qualification_step"):
+                # Agent turn only sees tools in 'qualification_step'
+                pass
+        """
+        from .scope import Scope
+        
+        if tools:
+            # Ad-hoc scope creation
+            instance = Scope(tools=tools)
+            instance.name = name
+            instance._sdk = self
+            return instance
+            
+        try:
+            # Fetch tools for the named scope from registry
+            resolved_tools = self.transport.request_json("GET", f"/registry/scope/{name}")
+            if not isinstance(resolved_tools, list):
+                resolved_tools = []
+            
+            instance = Scope(tools=resolved_tools)
+            instance.name = name
+            instance._sdk = self
+            return instance
+        except Exception:
+            # Fallback if registry fails or scope doesn't exist
+            # Create a scope with the name as step_id and no tools (safe default)
+            instance = Scope(tools=[], step_id=name)
+            instance.name = name
+            instance._sdk = self
+            return instance
+
 
     def receive_task(
         self,

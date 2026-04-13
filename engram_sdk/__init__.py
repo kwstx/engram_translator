@@ -9,9 +9,21 @@ from .exceptions import (
     EngramResponseError,
 )
 
+from typing import List, Optional
+
+def scope(name: str, tools: Optional[List[str]] = None, sdk: Optional[EngramSDK] = None) -> Scope:
+    """
+    Convenience method to create and activate a tool scope.
+    If no SDK instance is provided, a default EngramSDK() will be used.
+    """
+    if sdk is None:
+        sdk = EngramSDK()
+    return sdk.scope(name, tools=tools)
+
 __all__ = [
     "EngramSDK",
     "Scope",
+    "scope",
     "ScopeCache",
     "ToolDefinition",
     "TaskLease",

@@ -181,6 +181,11 @@ class ScopeValidateRequest(BaseModel):
     tools: List[str]
 
 
+class NamedScopeRequest(BaseModel):
+    name: str
+    tools: List[str]
+
+
 class ToolValidationResult(BaseModel):
     drift: bool
     corrected_schema: Optional[Dict[str, Any]] = None
@@ -223,6 +228,61 @@ async def activate_scope(
     logger.info("Scope activated", scope_id=request.scope_id, user_id=user_id, tool_count=len(request.tools))
     
     return {"status": "ok", "scope_id": request.scope_id}
+
+
+@router.post("/scope", status_code=status.HTTP_201_CREATED)
+async def create_named_scope(
+    request: NamedScopeRequest,
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Registers a named scope template for future activation.
+    Stored in Redis as a template.
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    user_id = principal.get("sub")
+    key = f"engram:scope:template:{user_id}:{request.name}"
+    
+    redis.set(key, json.dumps(request.tools))
+    logger.info("Named scope created", name=request.name, user_id=user_id, tool_count=len(request.tools))
+    
+    return {"status": "ok", "name": request.name}
+
+
+@router.get("/scope/{name}", response_model=List[str])
+async def get_named_scope(
+    name: str,
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Retrieves the tools associated with a named scope template.
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    user_id = principal.get("sub")
+    key = f"engram:scope:template:{user_id}:{name}"
+    
+    tools_raw = redis.get(key)
+    if not tools_raw:
+        # Fallback: check if 'all' is requested
+        if name == "all":
+            from sqlmodel import select
+            from app.db.models import ToolRegistry
+            from app.db.session import get_session
+            # This is a bit complex in a GET route without a Session dependency, 
+            # but for our current architecture, named scopes are the hero.
+            raise HTTPException(status_code=404, detail="Global 'all' scope must be explicitly managed or fallback to discovery.")
+            
+        raise HTTPException(status_code=404, detail=f"Scope template '{name}' not found")
+        
+    return json.loads(tools_raw)
 
 
 @router.post("/scope/validate", response_model=ScopeValidationResult)

@@ -623,6 +623,78 @@ register_app = typer.Typer(help="Onboard and register new APIs, CLI manifests, o
 app.add_typer(register_app, name="register")
 
 
+# --- Scope Subgroup ---
+scope_app = typer.Typer(help="Manage narrow tool scopes for agent turns and bounded workflows")
+app.add_typer(scope_app, name="scope")
+
+@scope_app.command("create")
+def scope_create(
+    name: str = typer.Option(..., "--name", "-n", help="Unique name for the scope (e.g., 'qualification_step')"),
+    tools: str = typer.Option(..., "--tools", "-t", help="Comma-separated list of tool names")
+):
+    """
+    Register a named tool scope in the registry. 
+    This allows agents to reference 'with engram.scope(\"name\"): ' in their SDK code.
+    """
+    tool_list = [t.strip() for t in tools.split(",") if t.strip()]
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold green]{task.description}"),
+        transient=True,
+    ) as progress:
+        progress.add_task(description=f"Registering scope '{name}'...", total=None)
+        try:
+            payload = {"name": name, "tools": tool_list}
+            state.request("POST", "/api/v1/registry/scope", json=payload)
+        except Exception as e:
+            rprint(f"[bold red]Registration Error:[/] {e}")
+            raise typer.Exit(1)
+
+    rprint(Panel(
+        f"[bold green]Scope Successfully Registered[/]\n\n"
+        f"[bold cyan]Name:[/] {name}\n"
+        f"[bold cyan]Tools ({len(tool_list)}):[/] {', '.join(tool_list)}\n\n"
+        f"[bold yellow]SDK Context Manager Usage:[/]\n"
+        f"[italic]with engram.scope(\"{name}\"):[/]\n"
+        f"[italic]    # turn logic here[/]",
+        title="[SCOPE] Semantic Boundary Definition",
+        border_style="green"
+    ))
+
+@scope_app.command("list")
+def scope_list():
+    """
+    List all pre-registered scope templates.
+    """
+    # Note: Backend doesn't have a dedicated list endpoint yet, 
+    # but we can simulate/implement if needed. 
+    # For now, we'll try to fetch from Redis templates if the API supports it.
+    try:
+        # In a real environment, we'd have a GET /registry/scope endpoint
+        # For Phase 1, we focus on creation and activation.
+        rprint("[yellow]Note: Multi-tenant scope listing is currently limited to active session scopes.[/]")
+        rprint("[dim]Use 'engram auth status' for session-specific pruning metadata.[/]")
+    except Exception as e:
+        rprint(f"[bold red]Error:[/] {e}")
+
+@scope_app.command("show")
+def scope_show(name: str = typer.Argument(..., help="Name of the scope to inspect")):
+    """
+    Show tool definitions and details for a specific named scope.
+    """
+    try:
+        tools = state.request("GET", f"/api/v1/registry/scope/{name}")
+        table = Table(title=f"[SCOPE] Tools in '{name}'", box=box.ROUNDED)
+        table.add_column("Tool Name", style="cyan")
+        for t in tools:
+            table.add_row(t)
+        state.console.print(table)
+    except Exception as e:
+        rprint(f"[bold red]Error:[/] {e}")
+
+
+
+
 def _get_or_create_agent_id(ctx: CLIContext) -> str:
     """Helper to get a default agent ID for registration."""
     try:
