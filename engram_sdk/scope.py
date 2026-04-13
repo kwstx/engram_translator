@@ -110,6 +110,33 @@ class Scope:
         """Checks if a specific tool is included in this scope."""
         return tool_id in self.tools
 
+    def activate(self, sdk: Any) -> bool:
+        """
+        Pushes this scope's configuration (tool list + validated schemas) to the server.
+        Once activated, the MCP discovery endpoint will serve ONLY this narrow set 
+        for the given step_id, ensuring zero ambient discovery drift.
+        
+        Returns:
+            bool: True if activation was successful.
+        """
+        try:
+            payload = {
+                "scope_id": self.step_id,
+                "tools": self.tools,
+                "corrected_schemas": self.corrected_schemas,
+                "metadata": {
+                    "validated_at": self.validation_timestamp
+                }
+            }
+            response = sdk.transport.request_json(
+                "POST", 
+                "/registry/scope/activate", 
+                json_body=payload
+            )
+            return response.get("status") == "ok"
+        except Exception:
+            return False
+
     def validate(self, sdk: Optional[Any] = None) -> bool:
         """
         Queries the real backend state for each tool in the narrow list using the existing registry.

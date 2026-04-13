@@ -166,6 +166,48 @@ async def list_tools(
         )
 
 
+# --- Scope Management Endpoints ---
+
+class ScopeActivateRequest(BaseModel):
+    scope_id: str
+    tools: List[str]
+    corrected_schemas: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = {}
+
+@router.post("/scope/activate", status_code=status.HTTP_201_CREATED)
+async def activate_scope(
+    request: ScopeActivateRequest,
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Registers a narrow tool scope for a specific conversation turn/step.
+    Stored in Redis for fast lookup during MCP discovery.
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        logger.warning("Scope activation failed: Redis unavailable")
+        # We don't throw 500 here to allow fallback to ambient discovery if Redis is down,
+        # but in a hardened environment we might want to fail closed.
+        return {"status": "error", "message": "Persistence unavailable"}
+
+    user_id = principal.get("sub")
+    key = f"engram:scope:active:{user_id}:{request.scope_id}"
+    
+    scope_data = {
+        "tools": request.tools,
+        "corrected_schemas": request.corrected_schemas,
+        "metadata": request.metadata,
+        "activated_at": time.time()
+    }
+    
+    # TTL for scopes: 30 minutes for a conversation turn seems reasonable
+    redis.setex(key, 1800, json.dumps(scope_data))
+    logger.info("Scope activated", scope_id=request.scope_id, user_id=user_id, tool_count=len(request.tools))
+    
+    return {"status": "ok", "scope_id": request.scope_id}
+
+
 # --- MCP Native Server Implementation (JSON-RPC over HTTP) ---
 
 @router.post("/mcp/call", response_model=Dict[str, Any])
@@ -186,21 +228,54 @@ async def call_mcp_tool(
     if method == "mcp.list_tools":
         task_intent = params.get("task_intent", "")
         conversation_history = params.get("conversation_history", [])
+        scope_id = params.get("scope_id") or params.get("step_id")
         user_id = principal.get("sub")
         
+        active_scope = None
+        if scope_id and user_id:
+            from app.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis:
+                scope_key = f"engram:scope:active:{user_id}:{scope_id}"
+                cached_scope = redis.get(scope_key)
+                if cached_scope:
+                    active_scope = json.loads(cached_scope)
+                    logger.info("Found active scope for turn", scope_id=scope_id, user_id=user_id)
+
         stmt = select(ToolRegistry)
         if user_id:
             try:
                 user_uuid = uuid.UUID(user_id)
                 stmt = stmt.where(ToolRegistry.user_id == user_uuid)
             except (ValueError, TypeError):
-                # Fallback for old identity tokens
                 pass
             
         results = await db.execute(stmt)
         raw_tools = results.scalars().all()
         
-        # Pre-routing step to dynamically dynamically filter the tool list
+        # If an active scope is found, we ONLY return tools in that scope
+        if active_scope:
+            scope_tools = set(active_scope.get("tools", []))
+            corrected_schemas = active_scope.get("corrected_schemas", {})
+            
+            pruned_tools = [t for t in raw_tools if t.name in scope_tools]
+            
+            result = []
+            for t in pruned_tools:
+                # Use corrected schema if available from the pre-validation step
+                schema = corrected_schemas.get(t.name) or t.input_schema or {}
+                result.append({
+                    "id": str(t.id),
+                    "name": t.name,
+                    "description": t.description,
+                    "actions": t.actions or [],
+                    "input_schema": schema
+                })
+            
+            logger.info("Serving scoped discovery", scope_id=scope_id, served_count=len(result))
+            return {"jsonrpc": "2.0", "id": jsonrpc_id, "result": {"tools": result}}
+
+        # Fallback to ambient discovery if no specific scope is active
         pruned_tools = context_aware_prune_tools(raw_tools, task_intent, conversation_history)
         
         result = [

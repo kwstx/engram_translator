@@ -90,3 +90,25 @@ def test_scope_cache_hash_collision_avoidance():
     
     if os.path.exists("./tmp_test_collision"):
         shutil.rmtree("./tmp_test_collision")
+
+def test_scope_activation_sdk_call():
+    """Verifies that scope.activate correctly calls the registry endpoint."""
+    mock_sdk = MagicMock()
+    mock_sdk.transport = MagicMock()
+    mock_sdk.transport.request_json.return_value = {"status": "ok"}
+    
+    tools = ["tool1", "tool2"]
+    scope = Scope(tools=tools, step_id="step-123")
+    scope.corrected_schemas = {"tool1": {"type": "object"}}
+    scope.validation_timestamp = 123456789.0
+    
+    success = scope.activate(mock_sdk)
+    
+    assert success is True
+    mock_sdk.transport.request_json.assert_called_once()
+    args, kwargs = mock_sdk.transport.request_json.call_args
+    assert args[0] == "POST"
+    assert args[1] == "/registry/scope/activate"
+    assert kwargs["json_body"]["scope_id"] == "step-123"
+    assert kwargs["json_body"]["tools"] == tools
+    assert kwargs["json_body"]["corrected_schemas"] == scope.corrected_schemas
