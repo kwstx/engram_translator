@@ -11,6 +11,7 @@ from .global_data import get_global_data, GlobalData
 logger = structlog.get_logger(__name__)
 
 from .types import ToolCall
+from .routing import RoutingEngine
 
 class Step:
     """
@@ -37,6 +38,21 @@ class Step:
         self.required_fields = required_fields or []
         self.description = description
         self.role_guidance = role_guidance
+        self.routing_decisions: Dict[str, str] = {}
+
+    def setup(self, sdk: EngramSDK, routing_engine: RoutingEngine) -> Scope:
+        """
+        Activates the step by pre-calculating routing decisions and setting up the scope.
+        """
+        logger.info("step_setup", step=self.name)
+        
+        # 1. Evaluate performance-weighted graph and cache decisions
+        self.routing_decisions = routing_engine.setup_step(self.name, self.tools)
+        
+        # 2. Initialize Scope with cached decisions
+        scope = sdk.scope(self.name, tools=self.tools)
+        scope.routing_decisions = self.routing_decisions
+        return scope
 
     def validate_preconditions(self, data_store: GlobalData) -> bool:
         """Verifies that all required context from prior steps is satisfied."""
@@ -70,6 +86,7 @@ class ControlPlane:
         self.current_step_name: Optional[str] = None
         self.tool_handlers: Dict[str, Callable] = {}
         self.role_guidance: str = STANDARD_ROLE_GUIDANCE
+        self.routing_engine = RoutingEngine(sdk)
 
     def register_tool_handler(self, tool_name: str, handler: Callable) -> ControlPlane:
         """Maps a tool name to its local implementation function."""
@@ -158,11 +175,8 @@ class ControlPlane:
                 missing = [p for p in step.preconditions if self.global_data.get(p) is None]
                 raise ValueError(f"Step '{self.current_step_name}' failed preconditions. Missing: {missing}")
 
-            # 2. Enforce Tool Governance (Narrow Scope)
-            step_scope = Scope(
-                tools=step.tools, 
-                step_id=f"pgi_{self.current_step_name}_{self.sdk.agent_id or 'anon'}"
-            )
+            # 2. Step Setup & Routing Evaluation (Activation Time)
+            step_scope = step.setup(self.sdk, self.routing_engine)
             step_scope._sdk = self.sdk
             
             logger.info("collecting_data", step=self.current_step_name, tools=step.tools)
@@ -234,8 +248,8 @@ class ControlPlane:
                 missing = [p for p in step.preconditions if self.global_data.get(p) is None]
                 raise ValueError(f"Step '{self.current_step_name}' failed preconditions. Missing: {missing}")
 
-            # 2. Narrow Scope + Governed Turn
-            with self.sdk.scope(step.name, tools=step.tools) as scope:
+            # 2. Step Setup & Routing Evaluation (Activation Time)
+            with step.setup(self.sdk, self.routing_engine) as scope:
                 logger.info("orchestrator_step_active", step=step.name, allowed_tools=step.tools)
                 
                 # Call model with Thin Prompt role guidance

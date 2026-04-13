@@ -4,6 +4,7 @@ from .types import ToolDefinition, TaskLease, TaskSubmissionResult, TaskExecutio
 from .execution import TaskExecutor
 from .adapter import RuntimeAdapter, ScopeValidationError
 from .control_plane import ControlPlane
+from .routing import RoutingEngine
 from .exceptions import (
     EngramSDKError,
     EngramAuthError,
@@ -65,6 +66,7 @@ __all__ = [
     "verify_security_clearance",
     "generate_access_report",
     "delete_data",
-    "scrub_sensitive_data"
+    "scrub_sensitive_data",
+    "RoutingEngine"
 ]
 
