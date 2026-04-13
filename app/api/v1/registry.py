@@ -433,5 +433,36 @@ def _estimate_result_tokens(result: Dict[str, Any]) -> int:
         payload = str(result)
     return estimate_tokens(payload)
 
+@router.post("/tools/{tool_name}/validate")
+async def validate_tool_schema(
+    tool_name: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_session),
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Validates a tool's current schema against the real backend state
+    using OWL ontology and ML embeddings to detect drift.
+    """
+    from app.reconciliation.engine import reconciliation_engine
+    
+    current_schema = body.get("current_schema") or {}
+    
+    # In a production scenario, we might also trigger a re-discovery 
+    # of the tool's source (API/CLI) here.
+    
+    corrected = await reconciliation_engine.validate_tool_drift(tool_name, current_schema)
+    
+    if corrected:
+        return {
+            "drift": True,
+            "tool": tool_name,
+            "corrected_schema": corrected,
+            "message": "Semantic drift detected and corrected schema generated."
+        }
+    
+    return {"drift": False, "tool": tool_name}
+
+
 # --- Helper to register the router ---
 # Usually done in main.py

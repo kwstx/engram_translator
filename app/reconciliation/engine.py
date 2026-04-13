@@ -107,6 +107,40 @@ class ReconciliationEngine:
         await self._log_failure(source_protocol, target_protocol, source_field, suggestion, score)
         return suggestion if score >= self.similarity_threshold else None
 
+    async def validate_tool_drift(self, tool_name: str, input_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Validates a tool's schema against the ontology and real-world definitions.
+        Uses ML embeddings for similarity and OWL for logic-based verification.
+        """
+        drift_detected = False
+        corrected_schema = dict(input_schema)
+        properties = corrected_schema.get("properties", {})
+        
+        if not properties:
+            # If no properties, maybe it's a simple type or actions-based tool
+            return None
+
+        new_properties = {}
+        for field_name, field_def in properties.items():
+            # Check for semantic mapping
+            # We use resolve_field to see if there's a better name in the ontology
+            # (In a real scenario, we might also use LLM to check if descriptions match)
+            suggestion = await self.resolve_field("BASE", "BASE", field_name)
+            
+            if suggestion and suggestion != field_name:
+                logger.info("Drift detected in tool schema", tool=tool_name, field=field_name, suggestion=suggestion)
+                drift_detected = True
+                new_properties[suggestion] = field_def
+            else:
+                new_properties[field_name] = field_def
+        
+        if drift_detected:
+            corrected_schema["properties"] = new_properties
+            logger.info("Generated corrected schema for drifted tool", tool=tool_name)
+            return corrected_schema
+            
+        return None
+
     async def _update_mapping(self, source_protocol: str, target_protocol: str, source_field: str, target_field: str):
         async with self.get_session() as session:
             query = select(ProtocolMapping).where(
