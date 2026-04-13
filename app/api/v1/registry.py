@@ -186,6 +186,11 @@ class NamedScopeRequest(BaseModel):
     tools: List[str]
 
 
+class NamedFlowRequest(BaseModel):
+    name: str
+    steps: List[str]
+
+
 class ToolValidationResult(BaseModel):
     tool_id: str
     drift: bool
@@ -315,6 +320,84 @@ async def get_named_scope(
         raise HTTPException(status_code=404, detail=f"Scope template '{name}' not found")
         
     return json.loads(tools_raw)
+
+
+# --- Flow Management Endpoints ---
+
+@router.post("/flow", status_code=status.HTTP_201_CREATED)
+async def create_named_flow(
+    request: NamedFlowRequest,
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Registers a named flow template (ordered sequence of steps).
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    user_id = principal.get("sub")
+    key = f"engram:flow:template:{user_id}:{request.name}"
+    
+    redis.set(key, json.dumps(request.steps))
+    logger.info("Named flow created", name=request.name, user_id=user_id, step_count=len(request.steps))
+    
+    return {"status": "ok", "name": request.name}
+
+
+@router.get("/flow", response_model=List[Dict[str, Any]])
+async def list_named_flows(
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Lists all named flow templates registered by the current user.
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    user_id = principal.get("sub")
+    pattern = f"engram:flow:template:{user_id}:*"
+    keys = redis.keys(pattern)
+    
+    results = []
+    for key in keys:
+        name = key.split(":")[-1]
+        steps_raw = redis.get(key)
+        if steps_raw:
+            steps = json.loads(steps_raw)
+            results.append({
+                "name": name,
+                "step_count": len(steps),
+                "steps": steps
+            })
+            
+    return results
+
+
+@router.get("/flow/{name}", response_model=List[str])
+async def get_named_flow(
+    name: str,
+    principal: Dict[str, Any] = Depends(get_current_principal)
+):
+    """
+    Retrieves the steps associated with a named flow template.
+    """
+    from app.core.redis_client import get_redis_client
+    redis = get_redis_client()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    user_id = principal.get("sub")
+    key = f"engram:flow:template:{user_id}:{name}"
+    
+    steps_raw = redis.get(key)
+    if not steps_raw:
+        raise HTTPException(status_code=404, detail=f"Flow template '{name}' not found")
+        
+    return json.loads(steps_raw)
 
 
 @router.post("/scope/validate", response_model=ScopeValidationResult)

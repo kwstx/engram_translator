@@ -34,11 +34,40 @@ def scope(name: str, tools: Optional[List[str]] = None, sdk: Optional[EngramSDK]
         sdk = EngramSDK()
     return sdk.scope(name, tools=tools)
 
+def flow(name: str, sdk: Optional[EngramSDK] = None) -> ControlPlane:
+    """
+    Convenience method to enter a specific governed flow.
+    """
+    if sdk is None:
+        sdk = EngramSDK()
+    return ControlPlane(sdk).flow(name)
+
+# Lazy-loaded default control plane for 'with engram.control_plane.step(...)'
+_cp_instance = None
+
+def _get_cp():
+    global _cp_instance
+    if _cp_instance is None:
+        _cp_instance = ControlPlane(EngramSDK())
+    return _cp_instance
+
+import sys
+
+class _EngramModule(sys.modules[__name__].__class__):
+    @property
+    def control_plane(self):
+        return _get_cp()
+
+sys.modules[__name__].__class__ = _EngramModule
+
 __all__ = [
     "EngramSDK",
     "Scope",
     "scope",
+    "flow",
+    "control_plane",
     "ControlPlane",
+
     "ScopeCache",
     "ToolDefinition",
     "TaskLease",

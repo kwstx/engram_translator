@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Callable, Tuple, TYPE_CHECKING
 import structlog
+import contextlib
 
 if TYPE_CHECKING:
     from .client import EngramSDK
@@ -288,3 +289,53 @@ class ControlPlane:
                 
         logger.info("orchestrator_finished")
         return self.global_data.all()
+
+    @contextlib.contextmanager
+    def step(self, name: str):
+        """
+        SDK Context manager for entering a governed step.
+        
+        This manages scope activation, drift validation, and routing pre-calculation 
+        automatically. It ensures that only tools permitted for this specific step 
+        are available to the model.
+        
+        Example:
+            with cp.step("data_gathering"):
+                # calls tool...
+        """
+        step = self.steps.get(name)
+        if not step:
+            # Fallback for ad-hoc steps or remote steps not yet registered locally
+            logger.debug("adhoc_step_activation", step_name=name)
+            scope = self.sdk.scope(name)
+        else:
+            # Full governed activation
+            if not step.validate_preconditions(self.global_data):
+                missing = [p for p in step.preconditions if self.global_data.get(p) is None]
+                raise ValueError(f"Step '{name}' failed preconditions. Missing: {missing}")
+            
+            scope = step.setup(self.sdk, self.routing_engine)
+        
+        with scope as activated_scope:
+            self.current_step_name = name
+            yield activated_scope
+            # After step exit, we could potentially clear current_step_name 
+            # or record performance if needed.
+
+    def flow(self, name: str) -> ControlPlane:
+        """
+        Enters the context of a specific named flow.
+        
+        This method retrieves the flow definition (sequence of steps) from the 
+        registry and can be used to initialize the ControlPlane sequence.
+        """
+        logger.info("entering_flow", flow_name=name)
+        try:
+            flow_steps = self.sdk.transport.request_json("GET", f"/registry/flow/{name}")
+            # For now, we just ensure these steps are 'known' or log the sequence.
+            # In a more advanced version, this could pre-validate the whole sequence.
+            logger.debug("flow_steps_resolved", count=len(flow_steps))
+        except Exception as e:
+            logger.warning("flow_resolution_failed", flow_name=name, error=str(e))
+        
+        return self

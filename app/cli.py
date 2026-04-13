@@ -798,6 +798,92 @@ def scope_show(name: str = typer.Argument(..., help="Name of the scope to inspec
         rprint(f"[bold red]Error:[/] {e}")
 
 
+# --- Flow Subgroup ---
+flow_app = typer.Typer(help="Manage governed multi-step flows and strict sequences")
+app.add_typer(flow_app, name="flow")
+
+@flow_app.command("create")
+def flow_create(
+    name: str = typer.Argument(..., help="Unique name for the flow (e.g., 'research_pipeline')"),
+    steps: str = typer.Option(..., "--steps", "-s", help="Comma-separated list of step names")
+):
+    """
+    Register a named multi-step flow.
+    This allows definition of strict data collection sequences for agents.
+    """
+    step_list = [s.strip() for s in steps.split(",") if s.strip()]
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold green]{task.description}"),
+        transient=True,
+    ) as progress:
+        progress.add_task(description=f"Registering flow '{name}'...", total=None)
+        try:
+            payload = {"name": name, "steps": step_list}
+            state.request("POST", "/api/v1/registry/flow", json=payload)
+        except Exception as e:
+            rprint(f"[bold red]Registration Error:[/] {e}")
+            raise typer.Exit(1)
+
+    rprint(Panel(
+        f"[bold green]Flow Successfully Registered[/]\n\n"
+        f"[bold cyan]Name:[/] {name}\n"
+        f"[bold cyan]Steps ({len(step_list)}):[/] {', '.join(step_list)}\n\n"
+        f"[bold yellow]SDK Usage:[/]\n"
+        f"[italic]with engram.flow(\"{name}\"):[/]\n"
+        f"[italic]    with engram.control_plane.step(\"{step_list[0]}\"):[/]\n"
+        f"[italic]        # turn logic here[/]",
+        title="[FLOW] Programmatic Governance Sequence",
+        border_style="green"
+    ))
+
+@flow_app.command("list")
+def flow_list():
+    """
+    List all pre-registered flow templates.
+    """
+    try:
+        flows = state.request("GET", "/api/v1/registry/flow")
+        
+        if not flows:
+            rprint("[yellow]No named flows found.[/]")
+            return
+
+        table = Table(title="[FLOW] Registered Flow Templates", box=box.DOUBLE_EDGE)
+        table.add_column("Flow Name", style="bold cyan")
+        table.add_column("Steps Count", justify="center")
+        table.add_column("Steps Sequence", style="dim green")
+        
+        for f in flows:
+            table.add_row(
+                f["name"],
+                str(f["step_count"]),
+                " -> ".join(f["steps"])
+            )
+            
+        state.console.print(table)
+        rprint(f"\n[dim]Showing {len(flows)} named flow templates.[/]")
+
+    except Exception as e:
+        rprint(f"[bold red]Error:[/] {e}")
+
+@flow_app.command("show")
+def flow_show(name: str = typer.Argument(..., help="Name of the flow to inspect")):
+    """
+    Show step definitions for a specific named flow.
+    """
+    try:
+        steps = state.request("GET", f"/api/v1/registry/flow/{name}")
+        table = Table(title=f"[FLOW] Steps in '{name}'", box=box.ROUNDED)
+        table.add_column("Step Name", style="cyan")
+        for s in steps:
+            table.add_row(s)
+        state.console.print(table)
+    except Exception as e:
+        rprint(f"[bold red]Error:[/] {e}")
+
+
+
 
 
 def _get_or_create_agent_id(ctx: CLIContext) -> str:
