@@ -1,7 +1,10 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
+import structlog
 
 from .communication import EngramTransport
 from .exceptions import EngramAuthError
+
+logger = structlog.get_logger(__name__)
 
 
 class AuthClient:
@@ -72,13 +75,28 @@ class AuthClient:
             auth=None,
         )
 
-    def generate_eat(self, *, expires_days: Optional[int] = None) -> str:
+    def generate_eat(
+        self, 
+        *, 
+        expires_days: Optional[int] = None,
+        scope_id: Optional[str] = None,
+        tools: Optional[List[str]] = None
+    ) -> str:
         if not self._transport.token:
             self.ensure_session_token()
+        
+        payload: Dict[str, Any] = {
+            "expires_days": expires_days or self._eat_expires_days
+        }
+        if scope_id:
+            payload["scope_id"] = scope_id
+        if tools:
+            payload["tools"] = tools
+
         response = self._transport.request_json(
             "POST",
             "/auth/tokens/generate-eat",
-            params={"expires_days": expires_days or self._eat_expires_days},
+            json_body=payload,
             auth="token",
         )
         eat = response.get("eat")
@@ -86,6 +104,14 @@ class AuthClient:
             raise EngramAuthError("EAT generation failed; missing eat token.")
         self._transport.set_eat(eat)
         return eat
+
+    def narrow_eat(self, scope_id: str, tools: List[str]) -> str:
+        """
+        Narrow the current EAT's semantic permissions to only the specified 
+        tools within a specific scope.
+        """
+        logger.info("narrowing_eat_permissions", scope_id=scope_id, tool_count=len(tools))
+        return self.generate_eat(scope_id=scope_id, tools=tools)
 
     def set_session_token(self, token: Optional[str]) -> None:
         self._transport.set_token(token)

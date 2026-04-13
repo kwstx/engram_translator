@@ -124,6 +124,10 @@ class Scope:
         Once activated, the MCP discovery endpoint will serve ONLY this narrow set 
         for the given step_id, ensuring zero ambient discovery drift.
         
+        This method also automatically narrows the current session's EAT token 
+        to only include the tools permitted in this scope, enforcing strict 
+        semantic permissions at the identity layer.
+
         Returns:
             bool: True if activation was successful.
         """
@@ -142,6 +146,11 @@ class Scope:
                 "/registry/scope/activate", 
                 json_body=payload
             )
+            
+            # Narrow the token's semantic permissions to match this scope
+            if hasattr(sdk, "auth"):
+                sdk.auth.narrow_eat(scope_id=self.step_id, tools=self.tools)
+
             return response.get("status") == "ok"
         except Exception:
             return False
