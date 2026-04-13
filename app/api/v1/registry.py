@@ -545,11 +545,11 @@ async def call_mcp_tool(
             error_message = None
             try:
                 if selected_backend == CLI_BACKEND:
-                    result = await run_cli_execution(tool, metadata, action_name, arguments, principal)
+                    result = await run_cli_execution(tool, metadata, action_name, arguments, principal, scope_id=scope_id)
                 elif selected_backend in {MCP_BACKEND, HTTP_BACKEND}:
-                    result = await run_http_execution(tool, metadata, action_name, arguments, principal)
+                    result = await run_http_execution(tool, metadata, action_name, arguments, principal, scope_id=scope_id)
                 else:
-                    result = await run_http_execution(tool, metadata, action_name, arguments, principal)
+                    result = await run_http_execution(tool, metadata, action_name, arguments, principal, scope_id=scope_id)
             except Exception as exc:
                 error_message = str(exc)
                 raise
@@ -602,7 +602,7 @@ async def call_mcp_tool(
     return {"jsonrpc": "2.0", "id": jsonrpc_id, "error": {"code": -32601, "message": "Method not found"}}
 
 
-async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any]):
+async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any], scope_id: Optional[str] = None):
     """
     Execute a CLI command in a secure subprocess with structured semantic tracing.
     """
@@ -620,7 +620,7 @@ async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata,
         if not token:
             logger.warning("CLI execution aborted: missing EAT", tool_name=tool.name)
             return {"jsonrpc": "2.0", "error": {"code": -32001, "message": "Missing EAT token."}}
-        payload = verify_engram_token(token)
+        payload = verify_engram_token(token, scope_id=scope_id)
         authz = SemanticAuthorizationService()
         args = authz.enforce(payload, tool, action, args)
     except HTTPException as exc:
@@ -659,7 +659,7 @@ async def run_cli_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata,
         logger.error("CLI subprocess failed", error=str(e), command=cmd_base)
         return {"jsonrpc": "2.0", "error": {"code": -32000, "message": str(e)}}
 
-async def run_http_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any]):
+async def run_http_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata, action: str, args: Dict[str, Any], principal: Dict[str, Any], scope_id: Optional[str] = None):
     """
     Execute an HTTP/MCP tool call with structured semantic tracing.
     """
@@ -677,7 +677,7 @@ async def run_http_execution(tool: ToolRegistry, metadata: ToolExecutionMetadata
         if not token:
             logger.warning("HTTP execution aborted: missing EAT", tool_name=tool.name)
             return {"jsonrpc": "2.0", "error": {"code": -32001, "message": "Missing EAT token."}}
-        payload = verify_engram_token(token)
+        payload = verify_engram_token(token, scope_id=scope_id)
         authz = SemanticAuthorizationService()
         _ = authz.enforce(payload, tool, action, args)
     except HTTPException as exc:

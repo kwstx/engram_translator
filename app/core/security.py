@@ -154,10 +154,12 @@ def revoke_token(jti: str, expires_in: int):
         return
 
 
-def verify_engram_token(token: str) -> Dict[str, Any]:
+def verify_engram_token(token: str, scope_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Synchronously verifies an Engram Access Token (EAT).
     Checks signature, expiration, issuer, audience, type, and revocation status.
+    If a scope_id is provided, it narrows the token's semantic permissions to only
+    the tools authorized in that active scope.
     """
     key = _get_verification_key()
     try:
@@ -175,6 +177,39 @@ def verify_engram_token(token: str) -> Dict[str, Any]:
         if is_token_revoked(payload.get("jti")):
             raise HTTPException(status_code=401, detail="Token has been revoked.")
             
+        # Optional: Scope-level permission narrowing
+        if scope_id:
+            user_id = payload.get("sub")
+            redis = get_redis_client()
+            if redis and user_id:
+                scope_key = f"engram:scope:active:{user_id}:{scope_id}"
+                try:
+                    cached_scope_raw = redis.get(scope_key)
+                    if cached_scope_raw:
+                        import json
+                        active_scope = json.loads(cached_scope_raw)
+                        scope_tools = set(active_scope.get("tools", []))
+                        
+                        logger.info("Narrowing EAT permissions to active scope", 
+                                    scope_id=scope_id, user_id=user_id, tool_count=len(scope_tools))
+                        
+                        # Narrow allowed_tools
+                        token_tools = payload.get("allowed_tools", [])
+                        payload["allowed_tools"] = [t for t in token_tools if t in scope_tools]
+                        
+                        # Narrow per-tool scopes
+                        token_scopes = payload.get("scopes", {})
+                        payload["scopes"] = {
+                            t: permissions 
+                            for t, permissions in token_scopes.items() 
+                            if t in scope_tools
+                        }
+                    else:
+                        logger.warning("Scope narrowing requested but scope not found or expired", 
+                                       scope_id=scope_id, user_id=user_id)
+                except Exception as exc:
+                    logger.error("Failed to narrow token scopes from Redis", error=str(exc))
+
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Engram Access Token has expired.")

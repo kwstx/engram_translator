@@ -178,6 +178,18 @@ class SemanticAuthorizationService:
         action: str,
         args: Dict[str, Any],
     ) -> Dict[str, Any]:
+        # 1. First check if the tool is explicitly allowed in this token (especially for narrowed/scoped tokens)
+        allowed_tools = token_payload.get("allowed_tools")
+        if allowed_tools is not None:
+            # Check by name or ID
+            tool_id_str = str(tool.id)
+            if tool.name not in allowed_tools and tool_id_str not in allowed_tools:
+                logger.warning("Tool not in token's allowed_tools list", tool=tool.name, user_id=token_payload.get("sub"))
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Token does not authorize access to tool '{tool.name}'."
+                )
+
         action_norm = _normalize_action(action or "")
         token_scopes = token_payload.get("semantic_scopes") or []
         if not isinstance(token_scopes, list):
