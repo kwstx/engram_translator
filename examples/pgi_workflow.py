@@ -30,23 +30,23 @@ def mock_inference_fn(step_name, scope, data):
     
     return {}
 
-def handle_identification(model_output, context):
+def handle_identification(model_output, global_data):
     """
     Thick function for the identification step.
     Enforces that after identification, we ALWAYS go to 'get_orders'.
     """
     email = model_output.get("email")
-    context["user_email"] = email
+    global_data.set("user_email", email)
     print(f"[Thick Function] Identified user: {email}. Forcing transition to 'get_orders'.")
     return "get_orders", email
 
-def handle_orders(model_output, context):
+def handle_orders(model_output, global_data):
     """
     Thick function for the orders step.
     Decides the next transition based on whether orders were found.
     """
     orders = model_output.get("order_ids", [])
-    context["orders"] = orders
+    global_data.set("orders", orders)
     if orders:
         print(f"[Thick Function] Found {len(orders)} orders. Proceeding to analysis.")
         return "analyze_orders", orders
@@ -54,11 +54,12 @@ def handle_orders(model_output, context):
         print("[Thick Function] No orders found. Ending workflow.")
         return None, None
 
-def handle_analysis(model_output, context):
+def handle_analysis(model_output, global_data):
     """
     Final step handler. Returns None to signify the end of the workflow.
     """
     print(f"[Thick Function] Final Analysis Result: {model_output}")
+    print(f"[Thick Function] Verified Global State: {global_data.all()}")
     return None, model_output
 
 def main():

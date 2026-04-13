@@ -11,6 +11,7 @@ from .tasks import TaskClient
 from .tools import ToolRegistry
 from .translation import TranslationClient
 from .types import TaskLease, ToolDefinition, TranslationResponse
+from .global_data import STORE_DATA_TOOL, RETRIEVE_DATA_TOOL
 
 DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 
@@ -46,6 +47,8 @@ class EngramSDK:
         self.transport.set_auth_handler(self.auth)
         self.tasks = TaskClient(self.transport)
         self.tools = ToolRegistry()
+        self.tools.register(STORE_DATA_TOOL)
+        self.tools.register(RETRIEVE_DATA_TOOL)
         self.translation = TranslationClient(self.transport)
         
         # Initialize caching layer for validated scopes (Redis or Local)

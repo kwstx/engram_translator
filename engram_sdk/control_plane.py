@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from .client import EngramSDK
 
 from .scope import Scope
+from .global_data import get_global_data, GlobalData
 
 logger = structlog.get_logger(__name__)
 
@@ -21,7 +22,7 @@ class Step:
         tools: List[str],
         next_step: Optional[str] = None,
         preconditions: Optional[List[str]] = None,
-        handler: Optional[Callable[[Any, Dict[str, Any]], Tuple[Optional[str], Any]]] = None,
+        handler: Optional[Callable[[Any, GlobalData], Tuple[Optional[str], Any]]] = None,
         required_fields: Optional[List[str]] = None,
         description: Optional[str] = None
     ):
@@ -33,9 +34,9 @@ class Step:
         self.required_fields = required_fields or []
         self.description = description
 
-    def validate_preconditions(self, context: Dict[str, Any]) -> bool:
+    def validate_preconditions(self, data_store: GlobalData) -> bool:
         """Verifies that all required context from prior steps is satisfied."""
-        missing = [p for p in self.preconditions if p not in context]
+        missing = [p for p in self.preconditions if data_store.get(p) is None]
         if missing:
             logger.error("step_precondition_failed", step=self.name, missing=missing)
             return False
@@ -53,14 +54,18 @@ class ControlPlane:
     def __init__(self, sdk: EngramSDK):
         self.sdk = sdk
         self.steps: Dict[str, Step] = {}
-        self.context: Dict[str, Any] = {}
+        self.global_data = get_global_data()
         self.current_step_name: Optional[str] = None
+
+    def reset_global_data(self) -> None:
+        """Clears all data from the global store."""
+        self.global_data.clear()
 
     def add_step(
         self, 
         name: str, 
         tools: List[str], 
-        handler: Optional[Callable[[Any, Dict[str, Any]], Tuple[Optional[str], Any]]] = None,
+        handler: Optional[Callable[[Any, GlobalData], Tuple[Optional[str], Any]]] = None,
         required_fields: Optional[List[str]] = None,
         next_step: Optional[str] = None,
         preconditions: Optional[List[str]] = None,
@@ -111,8 +116,8 @@ class ControlPlane:
                 raise ValueError(f"Step '{self.current_step_name}' not defined.")
             
             # 1. Enforce Preconditions
-            if not step.validate_preconditions(self.context):
-                missing = [p for p in step.preconditions if p not in self.context]
+            if not step.validate_preconditions(self.global_data):
+                missing = [p for p in step.preconditions if self.global_data.get(p) is None]
                 raise ValueError(f"Step '{self.current_step_name}' failed preconditions. Missing: {missing}")
 
             # 2. Enforce Tool Governance (Narrow Scope)
@@ -141,7 +146,7 @@ class ControlPlane:
                 # 5. Programmatic Transition
                 # Handler takes precedence, then default next_step.
                 if step.handler:
-                    next_step, next_data = step.handler(model_output, self.context)
+                    next_step, next_data = step.handler(model_output, self.global_data)
                 else:
                     next_step = step.next_step
                     next_data = model_output
