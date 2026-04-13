@@ -24,6 +24,11 @@ class ToolDefinition:
     tags: List[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class TaskLease:

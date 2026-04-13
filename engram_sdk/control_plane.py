@@ -10,6 +10,8 @@ from .global_data import get_global_data, GlobalData
 
 logger = structlog.get_logger(__name__)
 
+from .types import ToolCall
+
 class Step:
     """
     Defines a narrow list of allowed tools or functions for a specific moment 
@@ -56,6 +58,12 @@ class ControlPlane:
         self.steps: Dict[str, Step] = {}
         self.global_data = get_global_data()
         self.current_step_name: Optional[str] = None
+        self.tool_handlers: Dict[str, Callable] = {}
+
+    def register_tool_handler(self, tool_name: str, handler: Callable) -> ControlPlane:
+        """Maps a tool name to its local implementation function."""
+        self.tool_handlers[tool_name] = handler
+        return self
 
     def reset_global_data(self) -> None:
         """Clears all data from the global store."""
@@ -161,3 +169,71 @@ class ControlPlane:
                 current_data = next_data
 
         return current_data
+
+    def drive(
+        self, 
+        initial_step: str, 
+        inference_fn: Callable[[str, Scope], ToolCall]
+    ) -> Any:
+        """
+        Strict Orchestrator: Drives the governed workflow turn-by-turn.
+        
+        For each step:
+        1. Activates the current Step and enforces preconditions.
+        2. Supplies ONLY validated tools for that Step to the model via Scope.
+        3. Executes the chosen tool and writes results to GlobalData.
+        4. Automatically advances to the next Step.
+        """
+        self.current_step_name = initial_step
+        
+        logger.info("orchestrator_started", initial_step=initial_step)
+        
+        while self.current_step_name:
+            step = self.steps.get(self.current_step_name)
+            if not step:
+                raise ValueError(f"Step '{self.current_step_name}' not defined.")
+            
+            # 1. Enforce Preconditions
+            if not step.validate_preconditions(self.global_data):
+                missing = [p for p in step.preconditions if self.global_data.get(p) is None]
+                raise ValueError(f"Step '{self.current_step_name}' failed preconditions. Missing: {missing}")
+
+            # 2. Narrow Scope + Governed Turn
+            with self.sdk.scope(step.name, tools=step.tools) as scope:
+                logger.info("orchestrator_step_active", step=step.name, allowed_tools=step.tools)
+                
+                # Call model to pick a tool/turn
+                tool_call = inference_fn(self.current_step_name, scope)
+                
+                # Governance Check: Did the model call a permitted tool?
+                if tool_call.name not in step.tools:
+                    logger.error("governance_violation", step=step.name, attempted_tool=tool_call.name)
+                    raise ValueError(f"Step '{step.name}' violation: Tool '{tool_call.name}' is not allowed.")
+
+                # 3. Execute Tool
+                handler = self.tool_handlers.get(tool_call.name)
+                if not handler:
+                    logger.error("tool_handler_missing", tool=tool_call.name)
+                    raise ValueError(f"No handler registered for tool '{tool_call.name}'")
+
+                logger.info("executing_governed_tool", tool=tool_call.name)
+                result = handler(**tool_call.arguments)
+                
+                # 4. Write Results to GlobalData
+                # Store the raw return value in a step-specific key
+                result_key = f"{step.name}_output"
+                self.global_data.set(result_key, result)
+                
+                # 5. Programmatic Transition
+                if step.handler:
+                    # Custom handler can decide next step based on tool output
+                    next_step, _ = step.handler(result, self.global_data)
+                else:
+                    # Default to predefined next_step
+                    next_step = step.next_step
+                
+                logger.info("orchestrator_transition", from_step=step.name, to_step=next_step)
+                self.current_step_name = next_step
+                
+        logger.info("orchestrator_finished")
+        return self.global_data.all()
