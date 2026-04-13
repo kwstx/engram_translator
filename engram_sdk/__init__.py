@@ -3,6 +3,7 @@ from .scope import Scope, ScopeCache
 from .types import ToolDefinition, TaskLease, TaskSubmissionResult, TaskExecution, TaskResponse, TranslationResponse, MappingSuggestion
 from .execution import TaskExecutor
 from .adapter import RuntimeAdapter, ScopeValidationError
+from .control_plane import ControlPlane
 from .exceptions import (
     EngramSDKError,
     EngramAuthError,
@@ -25,6 +26,7 @@ __all__ = [
     "EngramSDK",
     "Scope",
     "scope",
+    "ControlPlane",
     "ScopeCache",
     "ToolDefinition",
     "TaskLease",
