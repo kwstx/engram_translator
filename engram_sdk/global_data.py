@@ -15,14 +15,15 @@ class GlobalData:
 
     def set(self, key: str, value: Any) -> None:
         """Stores a value in the global data store."""
-        logger.info("global_data_set", key=key, value_type=type(value).__name__)
+        vtype = type(value).__name__
+        logger.info("global_data_write", key=key, value_type=vtype)
         self._store[key] = value
 
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieves a value from the global data store."""
-        value = self._store.get(key, default)
-        logger.info("global_data_get", key=key, found=key in self._store)
-        return value
+        found = key in self._store
+        logger.info("global_data_read", key=key, found=found)
+        return self._store.get(key, default)
 
     def delete(self, key: str) -> bool:
         """Removes a key from the global data store."""
@@ -36,7 +37,7 @@ class GlobalData:
     def clear(self) -> None:
         """Clears all data from the global data store."""
         self._store.clear()
-        logger.info("global_data_cleared")
+        logger.info("global_data_clear_all")
 
     def all(self) -> Dict[str, Any]:
         """Returns all data in the global data store."""

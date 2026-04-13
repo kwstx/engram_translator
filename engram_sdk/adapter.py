@@ -1,6 +1,9 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import json
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 from .exceptions import EngramSDKError
 
@@ -47,6 +50,12 @@ class RuntimeAdapter:
         # 1. Enforce Scope Membership: The model proposes, the code disposes.
         if not self._scope.contains(tool_name):
             allowed = ", ".join(self._scope.tools)
+            logger.error(
+                "unauthorized_tool_call_blocked", 
+                tool=tool_name, 
+                allowed_in_scope=self._scope.tools,
+                step_id=self._scope.step_id
+            )
             raise ScopeValidationError(
                 f"Blocked unauthorized tool call: '{tool_name}' is not in the active scope. "
                 f"Current validated tools for this turn are: [{allowed}]. "
@@ -58,6 +67,8 @@ class RuntimeAdapter:
         # we log that we are using it. The backend already knows about this 
         # from the activate() call.
         corrected = self._scope.corrected_schemas.get(tool_name)
+        if corrected:
+            logger.info("using_corrected_schema", tool=tool_name, step_id=self._scope.step_id)
 
         # 3. Resolve Tool ID for Backend (mcp.call_tool expects UUID)
         tool_id = self._scope.tool_ids.get(tool_name, tool_name)
@@ -77,6 +88,7 @@ class RuntimeAdapter:
         }
 
         try:
+            logger.info("requesting_tool_execution", tool=tool_name, tool_id=tool_id)
             response = self._sdk.transport.request_json(
                 "POST", 
                 "/registry/mcp/call", 
@@ -85,12 +97,14 @@ class RuntimeAdapter:
             
             if "error" in response:
                 error = response["error"]
+                logger.warning("tool_execution_error", tool=tool_name, error=error)
                 # 5. SELF-HEALING FALLBACK: If we encounter drift that validation missed
                 # We check for schema deviations (JSON-RPC Invalid Params -32602 or specific drift hints)
                 if not _is_retry and self._is_unexpected_drift(error):
                     return self._apply_self_healing(tool_name, arguments, error, **kwargs)
                 return response
             
+            logger.info("tool_execution_success", tool=tool_name)
             return response.get("result", {})
         except Exception as e:
             return {

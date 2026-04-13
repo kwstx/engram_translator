@@ -5,6 +5,9 @@ import os
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 class ScopeCache:
@@ -42,16 +45,20 @@ class ScopeCache:
         try:
             if self.redis:
                 data = self.redis.get(f"scope_cache:{key}")
-                return json.loads(data) if data else None
+                if data:
+                    logger.info("scope_cache_hit_redis", key=key)
+                    return json.loads(data)
             
             if self.cache_dir:
                 cache_file = self.cache_dir / f"{key}.json"
                 if cache_file.exists():
+                    logger.info("scope_cache_hit_local", key=key)
                     with open(cache_file, "r") as f:
                         return json.load(f)
-        except Exception:
-            # If cache access fails, force a re-validation by returning None
-            pass
+        except Exception as e:
+            logger.warning("scope_cache_read_failure", error=str(e))
+        
+        logger.info("scope_cache_miss", key=key)
         return None
 
     def set(self, tools: List[str], corrected_schemas: Dict[str, Any], routing_decisions: Dict[str, str], tool_ids: Dict[str, str]):
@@ -132,6 +139,7 @@ class Scope:
             bool: True if activation was successful.
         """
         try:
+            logger.info("scope_activation_init", scope_id=self.step_id, tools=self.tools)
             payload = {
                 "scope_id": self.step_id,
                 "tools": self.tools,
@@ -149,10 +157,14 @@ class Scope:
             
             # Narrow the token's semantic permissions to match this scope
             if hasattr(sdk, "auth"):
+                logger.info("narrowing_eat_token", scope_id=self.step_id)
                 sdk.auth.narrow_eat(scope_id=self.step_id, tools=self.tools)
 
-            return response.get("status") == "ok"
-        except Exception:
+            success = response.get("status") == "ok"
+            logger.info("scope_activation_result", scope_id=self.step_id, success=success)
+            return success
+        except Exception as e:
+            logger.error("scope_activation_failed", scope_id=self.step_id, error=str(e))
             return False
 
     def validate(self, sdk: Optional[Any] = None) -> bool:
@@ -194,6 +206,7 @@ class Scope:
 
         # Batch validate via the backend endpoint
         try:
+            logger.info("scope_validation_init", tool_count=len(self.tools))
             payload = {"tools": self.tools}
             response = sdk.transport.request_json(
                 "POST",
@@ -211,7 +224,9 @@ class Scope:
                     self.tool_ids[tool_name] = tid
 
                 if result.get("drift"):
-                    self.corrected_schemas[tool_name] = result.get("corrected_schema")
+                    schema_change = result.get("corrected_schema")
+                    logger.warning("drift_detected", tool=tool_name, reason="schema_mismatch")
+                    self.corrected_schemas[tool_name] = schema_change
                     drift_detected = True
                 
                 # Store pre-calculated routing decision
@@ -223,15 +238,18 @@ class Scope:
             self.validation_timestamp = time.time()
             cache.set(self.tools, self.corrected_schemas, self.routing_decisions, self.tool_ids)
             
+            logger.info("scope_validation_complete", drift_detected=drift_detected)
             return not drift_detected
             
-        except Exception:
+        except Exception as e:
+            logger.warning("batch_validation_failed_falling_back", error=str(e))
             # If batch validation fails, fallback to legacy per-tool drift check (no routing caching)
             # This ensures robustness if the backend is briefly on an older version.
             drift_detected = False
             for tool_name in self.tools:
                 correction = sdk.tools.check_drift(tool_name, sdk.transport)
                 if correction:
+                    logger.warning("drift_detected_fallback", tool=tool_name)
                     self.corrected_schemas[tool_name] = correction
                     drift_detected = True
             
